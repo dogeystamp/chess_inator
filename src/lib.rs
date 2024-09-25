@@ -4,9 +4,9 @@ const BOARD_WIDTH: usize = 8;
 const BOARD_HEIGHT: usize = 8;
 const N_SQUARES: usize = BOARD_WIDTH * BOARD_HEIGHT;
 
-
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Default)]
 enum Color {
+    #[default]
     White,
     Black,
 }
@@ -36,10 +36,17 @@ impl TryFrom<char> for ColPiece {
     type Error = PieceErr;
 
     fn try_from(value: char) -> Result<Self, Self::Error> {
-        let col = if value.is_ascii_uppercase() { Color::White } else { Color::Black };
+        let col = if value.is_ascii_uppercase() {
+            Color::White
+        } else {
+            Color::Black
+        };
         let mut lower = value;
         lower.make_ascii_lowercase();
-        Ok(ColPiece {pc: Piece::try_from(lower)?, col}) 
+        Ok(ColPiece {
+            pc: Piece::try_from(lower)?,
+            col,
+        })
     }
 }
 
@@ -210,8 +217,25 @@ pub enum FenError {
     TooManyRows(usize),
     /// Too little rows.
     NotEnoughRows(usize),
+    /// Parser refuses to keep parsing move counter because it is too big.
+    TooManyMoves,
     /// Error in the parser.
     InternalError(usize),
+}
+
+/// Castling rights for one player
+#[derive(Debug)]
+pub struct CastlingRights {
+    /// Kingside
+    k: bool,
+    /// Queenside
+    q: bool,
+}
+
+impl Default for CastlingRights {
+    fn default() -> Self {
+        CastlingRights { k: true, q: true }
+    }
 }
 
 /// Game state.
@@ -224,6 +248,25 @@ pub struct Position {
 
     /// Mailbox (array) board. Location -> piece.
     mail: Mailbox,
+
+    /// En-passant square.
+    ///
+    /// (If a pawn moves twice, this is one square in front of the start position.)
+    ep_square: Option<Index>,
+
+    /// Castling rights (white)
+    white_castle: CastlingRights,
+    /// Castling rights (black)
+    black_castle: CastlingRights,
+
+    /// Plies since last irreversible (capture, pawn) move
+    half_moves: usize,
+
+    /// Full move counter (incremented after each black turn)
+    full_moves: usize,
+
+    /// Whose turn it is
+    turn: Color,
 }
 
 impl Position {
@@ -257,9 +300,10 @@ impl Position {
         //! Parse FEN string into position.
 
         /// Parser state machine.
-        ///
-        /// Space characters are considered part of the preceding state.
+        #[derive(Clone, Copy)]
         enum FenState {
+            /// Parses space characters between arguments, and jumps to next state.
+            Space,
             /// Accepts pieces in a row, or a slash, and stores row and column (0-indexed)
             Piece(usize, usize),
             /// Player whose turn it is
@@ -267,23 +311,49 @@ impl Position {
             /// Castling ability
             Castle,
             /// En passant square, letter part
-            EnPassantRow,
+            EnPassantFile,
             /// En passant square, digit part
-            EnPassantCol,
-            /// Half-move counter for 50-move draw rule. Resets after capture/pawn move.
+            EnPassantRank,
+            /// Half-move counter for 50-move draw rule
             HalfMove,
-            /// Full-move counter, incremented after each Black move
+            /// Full-move counter
             FullMove,
-            /// Final state.
-            Stop,
         }
+
+        /// Maximum amount of moves in the counter to parse before giving up
+        const MAX_MOVES: usize = 999_999;
 
         let mut pos = Position::default();
 
         let mut parser_state = FenState::Piece(0, 0);
+        let mut next_state = FenState::Space;
+
+        /// Create parse error at a given index
+        macro_rules! bad_char {
+            ($idx:ident) => {
+                Err(FenError::BadChar($idx))
+            };
+        }
+
+        /// Parse a space character, then jump to the given state
+        macro_rules! parse_space_and_goto {
+            ($next:expr) => {
+                parser_state = FenState::Space;
+                next_state = $next;
+            };
+        }
 
         for (i, c) in fen.chars().enumerate() {
             match parser_state {
+                FenState::Space => {
+                    match c {
+                        ' ' => {
+                            parser_state = next_state;
+                        }
+                        _ => return bad_char!(i),
+                    };
+                }
+
                 FenState::Piece(mut row, mut col) => {
                     // FEN stores rows differently from our bitboard
                     let real_row = BOARD_HEIGHT - 1 - row;
@@ -300,7 +370,7 @@ impl Position {
                             parser_state = FenState::Piece(row, col)
                         }
                         pc_char @ ('b'..='r' | 'B'..='R') => {
-                            let pc = ColPiece::try_from(pc_char).or(Err(FenError::BadChar(i)))?;
+                            let pc = ColPiece::try_from(pc_char).or(bad_char!(i))?;
 
                             pos.set_piece(
                                 Index::from_row_col(real_row, col)
@@ -321,7 +391,7 @@ impl Position {
                                 };
                                 parser_state = FenState::Piece(row, col);
                             } else {
-                                return Err(FenError::BadChar(i));
+                                return bad_char!(i);
                             }
                         }
                         ' ' => {
@@ -330,34 +400,83 @@ impl Position {
                             } else if col < BOARD_WIDTH {
                                 return Err(FenError::NotEnoughPieces(i));
                             }
-                            parser_state = FenState::Stop
+                            parser_state = FenState::Side
                         }
-                        _ => return Err(FenError::BadChar(i)),
+                        _ => return bad_char!(i),
                     };
                 }
                 FenState::Side => {
-                    todo!()
+                    match c {
+                        'w' => pos.turn = Color::White,
+                        'b' => pos.turn = Color::Black,
+                        _ => return bad_char!(i),
+                    }
+                    parse_space_and_goto!(FenState::Castle);
                 }
-                FenState::Castle => {
-                    todo!()
+                FenState::Castle => match c {
+                    'Q' => pos.white_castle.q = true,
+                    'q' => pos.black_castle.q = true,
+                    'K' => pos.white_castle.k = true,
+                    'k' => pos.black_castle.k = true,
+                    ' ' => parser_state = FenState::EnPassantRank,
+                    '-' => {
+                        parse_space_and_goto!(FenState::EnPassantRank);
+                    }
+                    _ => return bad_char!(i),
+                },
+                FenState::EnPassantRank => {
+                    match c {
+                        '-' => {
+                            parse_space_and_goto!(FenState::HalfMove);
+                        }
+                        'a'..='h' => {
+                            // TODO: fix this
+                            pos.ep_square = Some(Index((c as usize - 'a' as usize) * 8));
+                            parser_state = FenState::EnPassantFile;
+                        }
+                        _ => return bad_char!(i),
+                    };
                 }
-                FenState::EnPassantRow => {
-                    todo!()
-                }
-                FenState::EnPassantCol => {
-                    todo!()
+                FenState::EnPassantFile => {
+                    if let Some(digit) = c.to_digit(10) {
+                        pos.ep_square = Some(Index(
+                            usize::from(pos.ep_square.unwrap_or(Index(0))) + digit as usize,
+                        ));
+                    } else {
+                        return bad_char!(i);
+                    }
+                    parse_space_and_goto!(FenState::HalfMove);
                 }
                 FenState::HalfMove => {
-                    todo!()
+                    if let Some(digit) = c.to_digit(10) {
+                        if pos.half_moves > MAX_MOVES {
+                            return Err(FenError::TooManyMoves);
+                        }
+                        pos.half_moves *= 10;
+                        pos.half_moves += digit as usize;
+                    } else if c == ' ' {
+                        parser_state = FenState::FullMove;
+                    } else {
+                        return bad_char!(i);
+                    }
                 }
                 FenState::FullMove => {
-                    todo!()
+                    if let Some(digit) = c.to_digit(10) {
+                        if pos.half_moves > MAX_MOVES {
+                            return Err(FenError::TooManyMoves);
+                        }
+                        pos.full_moves *= 10;
+                        pos.full_moves += digit as usize;
+                    } else {
+                        return bad_char!(i);
+                    }
                 }
-                FenState::Stop => return Err(FenError::ExtraChar(i)),
             }
         }
 
-        if matches!(parser_state, FenState::Stop) {
+        // parser is always ready to receive another full move digit,
+        // so there is no real "stop" state
+        if matches!(parser_state, FenState::FullMove) {
             Ok(pos)
         } else {
             Err(FenError::MissingFields)
@@ -375,7 +494,7 @@ impl core::fmt::Display for Position {
                 str.push(ColPiece::opt_to_char(pc));
             }
             str += "\n";
-        };
+        }
         write!(f, "{}", str)
     }
 }
