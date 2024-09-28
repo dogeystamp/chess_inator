@@ -4,7 +4,7 @@ const BOARD_WIDTH: usize = 8;
 const BOARD_HEIGHT: usize = 8;
 const N_SQUARES: usize = BOARD_WIDTH * BOARD_HEIGHT;
 
-#[derive(Debug, Copy, Clone, Default)]
+#[derive(Debug, Copy, Clone, Default, PartialEq, Eq)]
 enum Color {
     #[default]
     White,
@@ -85,7 +85,7 @@ impl ColPiece {
 /// Square index newtype.
 ///
 /// A1 is (0, 0) -> 0, A2 is (0, 1) -> 2, and H8 is (7, 7) -> 63.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Index(usize);
 
 enum IndexError {
@@ -224,18 +224,12 @@ pub enum FenError {
 }
 
 /// Castling rights for one player
-#[derive(Debug)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct CastlingRights {
     /// Kingside
     k: bool,
     /// Queenside
     q: bool,
-}
-
-impl Default for CastlingRights {
-    fn default() -> Self {
-        CastlingRights { k: true, q: true }
-    }
 }
 
 /// Game state.
@@ -254,10 +248,8 @@ pub struct Position {
     /// (If a pawn moves twice, this is one square in front of the start position.)
     ep_square: Option<Index>,
 
-    /// Castling rights (white)
-    white_castle: CastlingRights,
-    /// Castling rights (black)
-    black_castle: CastlingRights,
+    /// Castling rights
+    castle: [CastlingRights; N_COLORS],
 
     /// Plies since last irreversible (capture, pawn) move
     half_moves: usize,
@@ -296,6 +288,9 @@ impl Position {
         *self.mail.sq(idx)
     }
 
+    /// Maximum amount of moves in the counter to parse before giving up
+    const MAX_MOVES: usize = 9_999;
+
     pub fn from_fen(fen: String) -> Result<Position, FenError> {
         //! Parse FEN string into position.
 
@@ -319,9 +314,6 @@ impl Position {
             /// Full-move counter
             FullMove,
         }
-
-        /// Maximum amount of moves in the counter to parse before giving up
-        const MAX_MOVES: usize = 999_999;
 
         let mut pos = Position::default();
 
@@ -413,25 +405,36 @@ impl Position {
                     }
                     parse_space_and_goto!(FenState::Castle);
                 }
-                FenState::Castle => match c {
-                    'Q' => pos.white_castle.q = true,
-                    'q' => pos.black_castle.q = true,
-                    'K' => pos.white_castle.k = true,
-                    'k' => pos.black_castle.k = true,
-                    ' ' => parser_state = FenState::EnPassantRank,
-                    '-' => {
-                        parse_space_and_goto!(FenState::EnPassantRank);
+                FenState::Castle => {
+                    macro_rules! wc {
+                        () => {
+                            pos.castle[Color::White as usize]
+                        };
                     }
-                    _ => return bad_char!(i),
-                },
+                    macro_rules! bc {
+                        () => {
+                            pos.castle[Color::Black as usize]
+                        };
+                    }
+                    match c {
+                        'Q' => wc!().q = true,
+                        'q' => bc!().q = true,
+                        'K' => wc!().k = true,
+                        'k' => bc!().k = true,
+                        ' ' => parser_state = FenState::EnPassantRank,
+                        '-' => {
+                            parse_space_and_goto!(FenState::EnPassantRank);
+                        }
+                        _ => return bad_char!(i),
+                    }
+                }
                 FenState::EnPassantRank => {
                     match c {
                         '-' => {
                             parse_space_and_goto!(FenState::HalfMove);
                         }
                         'a'..='h' => {
-                            // TODO: fix this
-                            pos.ep_square = Some(Index((c as usize - 'a' as usize) * 8));
+                            pos.ep_square = Some(Index(c as usize - 'a' as usize));
                             parser_state = FenState::EnPassantFile;
                         }
                         _ => return bad_char!(i),
@@ -440,7 +443,8 @@ impl Position {
                 FenState::EnPassantFile => {
                     if let Some(digit) = c.to_digit(10) {
                         pos.ep_square = Some(Index(
-                            usize::from(pos.ep_square.unwrap_or(Index(0))) + digit as usize,
+                            usize::from(pos.ep_square.unwrap_or(Index(0)))
+                                + (digit as usize - 1) * 8,
                         ));
                     } else {
                         return bad_char!(i);
@@ -449,7 +453,7 @@ impl Position {
                 }
                 FenState::HalfMove => {
                     if let Some(digit) = c.to_digit(10) {
-                        if pos.half_moves > MAX_MOVES {
+                        if pos.half_moves > Position::MAX_MOVES {
                             return Err(FenError::TooManyMoves);
                         }
                         pos.half_moves *= 10;
@@ -462,7 +466,7 @@ impl Position {
                 }
                 FenState::FullMove => {
                     if let Some(digit) = c.to_digit(10) {
-                        if pos.half_moves > MAX_MOVES {
+                        if pos.half_moves > Position::MAX_MOVES {
                             return Err(FenError::TooManyMoves);
                         }
                         pos.full_moves *= 10;
@@ -496,5 +500,130 @@ impl core::fmt::Display for Position {
             str += "\n";
         }
         write!(f, "{}", str)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_fen_pieces() {
+        let fen = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1";
+        let board = Position::from_fen(fen.into()).unwrap();
+        assert_eq!(
+            (0..N_SQUARES)
+                .map(Index)
+                .map(|i| board.get_piece(i))
+                .map(ColPiece::opt_to_char)
+                .collect::<String>(),
+            "RNBQKBNRPPPP.PPP............P...................pppppppprnbqkbnr"
+        );
+        assert_eq!(board.ep_square.unwrap(), Index(20));
+        assert_eq!(board.turn, Color::Black);
+    }
+
+    macro_rules! make_board{
+        ($fen_fmt: expr) => {
+            Position::from_fen(format!($fen_fmt)).unwrap()
+        }
+    }
+
+    #[test]
+    fn test_fen_ep_square() {
+        let test_cases = [("e3", 20), ("h8", 63), ("a8", 56), ("h4", 31), ("a1", 0)];
+        for (sqr, idx) in test_cases {
+            let board = make_board!("8/8/8/8/8/8/8/8 w - {sqr} 0 0");
+            assert_eq!(board.ep_square.unwrap(), Index(idx));
+        }
+
+        let board = make_board!("8/8/8/8/8/8/8/8 w - - 0 0");
+        assert_eq!(board.ep_square, None);
+    }
+
+    #[test]
+    fn test_fen_turn() {
+        let test_cases = [("w", Color::White), ("b", Color::Black)];
+        for (col_char, col) in test_cases {
+            let board = make_board!("8/8/8/8/8/8/8/8 {col_char} - - 0 0");
+            assert_eq!(board.turn, col);
+        }
+    }
+
+    #[test]
+    fn test_fen_castle_rights() {
+        let test_cases = [
+            (
+                "-",
+                [
+                    CastlingRights { k: false, q: false },
+                    CastlingRights { k: false, q: false },
+                ],
+            ),
+            (
+                "k",
+                [
+                    CastlingRights { k: false, q: false },
+                    CastlingRights { k: true, q: false },
+                ],
+            ),
+            (
+                "kq",
+                [
+                    CastlingRights { k: false, q: false },
+                    CastlingRights { k: true, q: true },
+                ],
+            ),
+            (
+                "qk",
+                [
+                    CastlingRights { k: false, q: false },
+                    CastlingRights { k: true, q: true },
+                ],
+            ),
+            (
+                "KQkq",
+                [
+                    CastlingRights { k: true, q: true },
+                    CastlingRights { k: true, q: true },
+                ],
+            ),
+            (
+                "KQ",
+                [
+                    CastlingRights { k: true, q: true },
+                    CastlingRights { k: false, q: false },
+                ],
+            ),
+            (
+                "QK",
+                [
+                    CastlingRights { k: true, q: true },
+                    CastlingRights { k: false, q: false },
+                ],
+            ),
+        ];
+        for (castle_str, castle) in test_cases {
+            let board = make_board!("8/8/8/8/8/8/8/8 w {castle_str} - 0 0");
+            assert_eq!(board.castle, castle);
+        }
+    }
+
+    #[test]
+    fn test_fen_half_move_counter() {
+        for i in 0..=Position::MAX_MOVES {
+            let board = make_board!("8/8/8/8/8/8/8/8 w - - {i} 0");
+            assert_eq!(board.half_moves, i);
+            assert_eq!(board.full_moves, 0);
+        }
+    }
+
+    #[test]
+    fn test_fen_move_counter() {
+        for i in 0..=Position::MAX_MOVES {
+            let board = make_board!("8/8/8/8/8/8/8/8 w - - 0 {i}");
+            assert_eq!(board.half_moves, 0);
+            assert_eq!(board.full_moves, i);
+        }
     }
 }
