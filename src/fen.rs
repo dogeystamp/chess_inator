@@ -1,4 +1,4 @@
-use crate::{Position, Index, Color, ColPiece};
+use crate::{BoardState, Square, Color, ColPiece};
 use crate::{BOARD_WIDTH, BOARD_HEIGHT};
 
 pub trait FromFen {
@@ -29,9 +29,9 @@ pub enum FenError {
     InternalError(usize),
 }
 
-impl FromFen for Position {
+impl FromFen for BoardState {
     type Error = FenError;
-    fn from_fen(fen: String) -> Result<Position, FenError> {
+    fn from_fen(fen: String) -> Result<BoardState, FenError> {
         //! Parse FEN string into position.
 
         /// Parser state machine.
@@ -55,7 +55,7 @@ impl FromFen for Position {
             FullMove,
         }
 
-        let mut pos = Position::default();
+        let mut pos = BoardState::default();
 
         let mut parser_state = FenState::Piece(0, 0);
         let mut next_state = FenState::Space;
@@ -105,7 +105,7 @@ impl FromFen for Position {
                             let pc = ColPiece::try_from(pc_char).or(bad_char!(i))?;
 
                             pos.set_piece(
-                                Index::from_row_col(real_row, col)
+                                Square::from_row_col(real_row, col)
                                     .or(Err(FenError::InternalError(i)))?,
                                 pc,
                             );
@@ -174,7 +174,7 @@ impl FromFen for Position {
                             parse_space_and_goto!(FenState::HalfMove);
                         }
                         'a'..='h' => {
-                            pos.ep_square = Some(Index(c as usize - 'a' as usize));
+                            pos.ep_square = Some(Square(c as usize - 'a' as usize));
                             parser_state = FenState::EnPassantFile;
                         }
                         _ => return bad_char!(i),
@@ -182,8 +182,8 @@ impl FromFen for Position {
                 }
                 FenState::EnPassantFile => {
                     if let Some(digit) = c.to_digit(10) {
-                        pos.ep_square = Some(Index(
-                            usize::from(pos.ep_square.unwrap_or(Index(0)))
+                        pos.ep_square = Some(Square(
+                            usize::from(pos.ep_square.unwrap_or(Square(0)))
                                 + (digit as usize - 1) * 8,
                         ));
                     } else {
@@ -193,7 +193,7 @@ impl FromFen for Position {
                 }
                 FenState::HalfMove => {
                     if let Some(digit) = c.to_digit(10) {
-                        if pos.half_moves > Position::MAX_MOVES {
+                        if pos.half_moves > BoardState::MAX_MOVES {
                             return Err(FenError::TooManyMoves);
                         }
                         pos.half_moves *= 10;
@@ -206,7 +206,7 @@ impl FromFen for Position {
                 }
                 FenState::FullMove => {
                     if let Some(digit) = c.to_digit(10) {
-                        if pos.half_moves > Position::MAX_MOVES {
+                        if pos.half_moves > BoardState::MAX_MOVES {
                             return Err(FenError::TooManyMoves);
                         }
                         pos.full_moves *= 10;
@@ -237,22 +237,22 @@ mod tests {
     #[test]
     fn test_fen_pieces() {
         let fen = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1";
-        let board = Position::from_fen(fen.into()).unwrap();
+        let board = BoardState::from_fen(fen.into()).unwrap();
         assert_eq!(
             (0..N_SQUARES)
-                .map(Index)
+                .map(Square)
                 .map(|i| board.get_piece(i))
                 .map(ColPiece::opt_to_char)
                 .collect::<String>(),
             "RNBQKBNRPPPP.PPP............P...................pppppppprnbqkbnr"
         );
-        assert_eq!(board.ep_square.unwrap(), Index(20));
+        assert_eq!(board.ep_square.unwrap(), Square(20));
         assert_eq!(board.turn, Color::Black);
     }
 
     macro_rules! make_board{
         ($fen_fmt: expr) => {
-            Position::from_fen(format!($fen_fmt)).unwrap()
+            BoardState::from_fen(format!($fen_fmt)).unwrap()
         }
     }
 
@@ -261,7 +261,7 @@ mod tests {
         let test_cases = [("e3", 20), ("h8", 63), ("a8", 56), ("h4", 31), ("a1", 0)];
         for (sqr, idx) in test_cases {
             let board = make_board!("8/8/8/8/8/8/8/8 w - {sqr} 0 0");
-            assert_eq!(board.ep_square.unwrap(), Index(idx));
+            assert_eq!(board.ep_square.unwrap(), Square(idx));
         }
 
         let board = make_board!("8/8/8/8/8/8/8/8 w - - 0 0");
@@ -338,7 +338,7 @@ mod tests {
 
     #[test]
     fn test_fen_half_move_counter() {
-        for i in 0..=Position::MAX_MOVES {
+        for i in 0..=BoardState::MAX_MOVES {
             let board = make_board!("8/8/8/8/8/8/8/8 w - - {i} 0");
             assert_eq!(board.half_moves, i);
             assert_eq!(board.full_moves, 0);
@@ -347,7 +347,7 @@ mod tests {
 
     #[test]
     fn test_fen_move_counter() {
-        for i in 0..=Position::MAX_MOVES {
+        for i in 0..=BoardState::MAX_MOVES {
             let board = make_board!("8/8/8/8/8/8/8/8 w - - 0 {i}");
             assert_eq!(board.half_moves, 0);
             assert_eq!(board.full_moves, i);
