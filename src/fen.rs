@@ -10,7 +10,7 @@ pub trait FromFen {
 }
 
 pub trait ToFen {
-    fn to_fen(self) -> String;
+    fn to_fen(&self) -> String;
 }
 
 /// FEN parsing error, with index of issue if applicable.
@@ -234,7 +234,7 @@ impl FromFen for BoardState {
 }
 
 impl ToFen for BoardState {
-    fn to_fen(self) -> String {
+    fn to_fen(&self) -> String {
         let pieces_str = (0..BOARD_HEIGHT)
             .rev()
             .map(|row| {

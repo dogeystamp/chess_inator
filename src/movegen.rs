@@ -5,6 +5,7 @@ use crate::{BoardState, Color, Square, BOARD_WIDTH};
 use std::rc::Rc;
 
 /// Game tree node.
+#[derive(Clone, Debug)]
 struct Node {
     /// Immutable position data.
     pos: BoardState,
@@ -113,7 +114,7 @@ mod tests {
     use super::*;
     use crate::fen::START_POSITION;
 
-    /// Test that make move works for regular piece pushes and captures.
+    /// Test that make move and unmake move for simple piece pushes/captures.
     ///
     /// Also tests en passant target square.
     #[test]
@@ -176,8 +177,8 @@ mod tests {
             ),
         ];
 
+        // make move
         let mut node = Node::default();
-
         for (src, dest, expect_fen) in moves {
             let idx_src = Square::from_algebraic(src.to_string()).unwrap();
             let idx_dest = Square::from_algebraic(dest.to_string()).unwrap();
@@ -187,6 +188,16 @@ mod tests {
             });
             node = mv.make(node);
             assert_eq!(node.pos.to_fen(), expect_fen.to_string())
+        }
+
+        // unmake move
+        let mut cur_node = Rc::new(node.clone());
+        for (_, _, expect_fen) in moves.iter().rev().chain([("", "", START_POSITION)].iter()) {
+            println!("{}", expect_fen);
+            assert_eq!(*cur_node.pos.to_fen(), expect_fen.to_string());
+            if *expect_fen != START_POSITION {
+                cur_node = cur_node.prev.clone().unwrap();
+            }
         }
     }
 }
