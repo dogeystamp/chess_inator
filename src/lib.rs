@@ -2,7 +2,6 @@
 
 pub mod fen;
 pub mod movegen;
-use std::rc::Rc;
 
 const BOARD_WIDTH: usize = 8;
 const BOARD_HEIGHT: usize = 8;
@@ -22,6 +21,15 @@ impl Color {
         match self {
             Color::White => Color::Black,
             Color::Black => Color::White,
+        }
+    }
+}
+
+impl From<Color> for char {
+    fn from(value: Color) -> Self {
+        match value {
+            Color::White => 'w',
+            Color::Black => 'b',
         }
     }
 }
@@ -102,6 +110,7 @@ impl ColPiece {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Square(usize);
 
+#[derive(Debug)]
 enum IndexError {
     OutOfBounds,
 }
@@ -127,6 +136,35 @@ impl Square {
         //! Get index of square based on row and column.
         let ret = BOARD_WIDTH * r + c;
         ret.try_into()
+    }
+    fn to_row_col(self) -> (usize, usize) {
+        //! Get row, column from index
+        let div = self.0 / BOARD_WIDTH;
+        let rem = self.0 % BOARD_WIDTH;
+        assert!(div <= 7);
+        assert!(rem <= 7);
+        (div, rem)
+    }
+
+    /// Convert square to typical human-readable form (e.g. `e4`).
+    fn to_algebraic(self) -> String {
+        let letters = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
+        let (row, col) = self.to_row_col();
+        let rank = (row + 1).to_string();
+        let file = letters[col];
+        format!("{file}{rank}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_to_algebraic() {
+        for (sqr, idx) in [("a1", 0), ("a8", 56), ("h1", 7), ("h8", 63)] {
+            assert_eq!(Square::try_from(idx).unwrap().to_algebraic(), sqr)
+        }
     }
 }
 
@@ -216,11 +254,36 @@ impl Player {
 
 /// Castling rights for one player
 #[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
-pub struct CastlingRights {
+pub struct CastlePlayer {
     /// Kingside
     k: bool,
     /// Queenside
     q: bool,
+}
+
+/// Castling rights for both players
+#[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
+pub struct CastleRights([CastlePlayer; N_COLORS]);
+
+impl ToString for CastleRights {
+    /// Convert to FEN castling rights format.
+    fn to_string(&self) -> String {
+        let mut ret = String::with_capacity(4);
+        for (val, ch) in [
+            (self.0[Color::White as usize].k, 'K'),
+            (self.0[Color::White as usize].q, 'Q'),
+            (self.0[Color::Black as usize].k, 'k'),
+            (self.0[Color::Black as usize].q, 'q'),
+        ] {
+            if val {
+                ret.push(ch)
+            }
+        }
+        if ret.is_empty() {
+            ret.push('-')
+        }
+        ret
+    }
 }
 
 /// Immutable game state, unique to a position.
@@ -240,7 +303,7 @@ pub struct BoardState {
     ep_square: Option<Square>,
 
     /// Castling rights
-    castle: [CastlingRights; N_COLORS],
+    castle: CastleRights,
 
     /// Plies since last irreversible (capture, pawn) move
     half_moves: usize,

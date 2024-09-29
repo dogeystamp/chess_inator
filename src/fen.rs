@@ -1,5 +1,4 @@
-use crate::{BoardState, Square, Color, ColPiece};
-use crate::{BOARD_WIDTH, BOARD_HEIGHT};
+use crate::{BoardState, CastleRights, ColPiece, Color, Square, BOARD_HEIGHT, BOARD_WIDTH};
 
 pub trait FromFen {
     type Error;
@@ -8,11 +7,15 @@ pub trait FromFen {
         Self: std::marker::Sized;
 }
 
+pub trait ToFen {
+    fn to_fen(self) -> String;
+}
+
 /// FEN parsing error, with index of issue if applicable.
 #[derive(Debug)]
 pub enum FenError {
     /// Invalid character.
-    BadChar(usize),
+    BadChar(usize, char),
     /// FEN is too short, and missing information.
     MissingFields,
     /// Too many pieces on a single row.
@@ -35,7 +38,7 @@ impl FromFen for BoardState {
         //! Parse FEN string into position.
 
         /// Parser state machine.
-        #[derive(Clone, Copy)]
+        #[derive(Debug, Clone, Copy)]
         enum FenState {
             /// Parses space characters between arguments, and jumps to next state.
             Space,
@@ -62,8 +65,8 @@ impl FromFen for BoardState {
 
         /// Create parse error at a given index
         macro_rules! bad_char {
-            ($idx:ident) => {
-                Err(FenError::BadChar($idx))
+            ($idx:ident, $char:ident) => {
+                Err(FenError::BadChar($idx, $char))
             };
         }
 
@@ -82,7 +85,7 @@ impl FromFen for BoardState {
                         ' ' => {
                             parser_state = next_state;
                         }
-                        _ => return bad_char!(i),
+                        _ => return bad_char!(i, c),
                     };
                 }
 
@@ -101,8 +104,8 @@ impl FromFen for BoardState {
                             row += 1;
                             parser_state = FenState::Piece(row, col)
                         }
-                        pc_char @ ('b'..='r' | 'B'..='R') => {
-                            let pc = ColPiece::try_from(pc_char).or(bad_char!(i))?;
+                        pc_char @ ('a'..='z' | 'A'..='Z') => {
+                            let pc = ColPiece::try_from(pc_char).or(bad_char!(i, c))?;
 
                             pos.set_piece(
                                 Square::from_row_col(real_row, col)
@@ -123,7 +126,7 @@ impl FromFen for BoardState {
                                 };
                                 parser_state = FenState::Piece(row, col);
                             } else {
-                                return bad_char!(i);
+                                return bad_char!(i, c);
                             }
                         }
                         ' ' => {
@@ -134,26 +137,26 @@ impl FromFen for BoardState {
                             }
                             parser_state = FenState::Side
                         }
-                        _ => return bad_char!(i),
+                        _ => return bad_char!(i, c),
                     };
                 }
                 FenState::Side => {
                     match c {
                         'w' => pos.turn = Color::White,
                         'b' => pos.turn = Color::Black,
-                        _ => return bad_char!(i),
+                        _ => return bad_char!(i, c),
                     }
                     parse_space_and_goto!(FenState::Castle);
                 }
                 FenState::Castle => {
                     macro_rules! wc {
                         () => {
-                            pos.castle[Color::White as usize]
+                            pos.castle.0[Color::White as usize]
                         };
                     }
                     macro_rules! bc {
                         () => {
-                            pos.castle[Color::Black as usize]
+                            pos.castle.0[Color::Black as usize]
                         };
                     }
                     match c {
@@ -165,7 +168,7 @@ impl FromFen for BoardState {
                         '-' => {
                             parse_space_and_goto!(FenState::EnPassantRank);
                         }
-                        _ => return bad_char!(i),
+                        _ => return bad_char!(i, c),
                     }
                 }
                 FenState::EnPassantRank => {
@@ -177,7 +180,7 @@ impl FromFen for BoardState {
                             pos.ep_square = Some(Square(c as usize - 'a' as usize));
                             parser_state = FenState::EnPassantFile;
                         }
-                        _ => return bad_char!(i),
+                        _ => return bad_char!(i, c),
                     };
                 }
                 FenState::EnPassantFile => {
@@ -187,7 +190,7 @@ impl FromFen for BoardState {
                                 + (digit as usize - 1) * 8,
                         ));
                     } else {
-                        return bad_char!(i);
+                        return bad_char!(i, c);
                     }
                     parse_space_and_goto!(FenState::HalfMove);
                 }
@@ -201,7 +204,7 @@ impl FromFen for BoardState {
                     } else if c == ' ' {
                         parser_state = FenState::FullMove;
                     } else {
-                        return bad_char!(i);
+                        return bad_char!(i, c);
                     }
                 }
                 FenState::FullMove => {
@@ -212,7 +215,7 @@ impl FromFen for BoardState {
                         pos.full_moves *= 10;
                         pos.full_moves += digit as usize;
                     } else {
-                        return bad_char!(i);
+                        return bad_char!(i, c);
                     }
                 }
             }
@@ -228,11 +231,55 @@ impl FromFen for BoardState {
     }
 }
 
+impl ToFen for BoardState {
+    fn to_fen(self) -> String {
+        let pieces_str = (0..BOARD_HEIGHT)
+            .rev()
+            .map(|row| {
+                let mut row_str = String::with_capacity(8);
+                let mut empty_counter = 0;
+                macro_rules! compact_empty {
+                    () => {
+                        if empty_counter > 0 {
+                            row_str.push_str(&empty_counter.to_string());
+                        }
+                    };
+                }
+
+                for col in 0..BOARD_WIDTH {
+                    let idx = Square::from_row_col(row, col).unwrap();
+                    if let Some(pc) = self.get_piece(idx) {
+                        compact_empty!();
+                        empty_counter = 0;
+                        row_str.push(pc.into())
+                    } else {
+                        empty_counter += 1;
+                    }
+                }
+                compact_empty!();
+                row_str
+            })
+            .collect::<Vec<String>>()
+            .join("/");
+
+        let turn = char::from(self.turn);
+        let castle = self.castle.to_string();
+        let ep_square = match self.ep_square {
+            Some(sqr) => sqr.to_algebraic(),
+            None => "-".to_string(),
+        };
+        let half_move = self.half_moves.to_string();
+        let full_move = self.full_moves.to_string();
+
+        format!("{pieces_str} {turn} {castle} {ep_square} {half_move} {full_move}")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::CastlePlayer;
     use crate::N_SQUARES;
-    use crate::CastlingRights;
 
     #[test]
     fn test_fen_pieces() {
@@ -250,10 +297,10 @@ mod tests {
         assert_eq!(board.turn, Color::Black);
     }
 
-    macro_rules! make_board{
+    macro_rules! make_board {
         ($fen_fmt: expr) => {
             BoardState::from_fen(format!($fen_fmt)).unwrap()
-        }
+        };
     }
 
     #[test]
@@ -283,56 +330,57 @@ mod tests {
             (
                 "-",
                 [
-                    CastlingRights { k: false, q: false },
-                    CastlingRights { k: false, q: false },
+                    CastlePlayer { k: false, q: false },
+                    CastlePlayer { k: false, q: false },
                 ],
             ),
             (
                 "k",
                 [
-                    CastlingRights { k: false, q: false },
-                    CastlingRights { k: true, q: false },
+                    CastlePlayer { k: false, q: false },
+                    CastlePlayer { k: true, q: false },
                 ],
             ),
             (
                 "kq",
                 [
-                    CastlingRights { k: false, q: false },
-                    CastlingRights { k: true, q: true },
+                    CastlePlayer { k: false, q: false },
+                    CastlePlayer { k: true, q: true },
                 ],
             ),
+            // This is the wrong order, but parsers should be lenient
             (
                 "qk",
                 [
-                    CastlingRights { k: false, q: false },
-                    CastlingRights { k: true, q: true },
+                    CastlePlayer { k: false, q: false },
+                    CastlePlayer { k: true, q: true },
                 ],
             ),
             (
                 "KQkq",
                 [
-                    CastlingRights { k: true, q: true },
-                    CastlingRights { k: true, q: true },
+                    CastlePlayer { k: true, q: true },
+                    CastlePlayer { k: true, q: true },
                 ],
             ),
             (
                 "KQ",
                 [
-                    CastlingRights { k: true, q: true },
-                    CastlingRights { k: false, q: false },
+                    CastlePlayer { k: true, q: true },
+                    CastlePlayer { k: false, q: false },
                 ],
             ),
             (
                 "QK",
                 [
-                    CastlingRights { k: true, q: true },
-                    CastlingRights { k: false, q: false },
+                    CastlePlayer { k: true, q: true },
+                    CastlePlayer { k: false, q: false },
                 ],
             ),
         ];
         for (castle_str, castle) in test_cases {
             let board = make_board!("8/8/8/8/8/8/8/8 w {castle_str} - 0 0");
-            assert_eq!(board.castle, castle);
+            assert_eq!(board.castle, CastleRights(castle));
         }
     }
 
@@ -352,5 +400,44 @@ mod tests {
             assert_eq!(board.half_moves, 0);
             assert_eq!(board.full_moves, i);
         }
+    }
+
+    #[test]
+    fn test_fen_printing() {
+        //! Test that FENs printed are equivalent to the original.
+
+        // FENs sourced from https://gist.github.com/peterellisjones/8c46c28141c162d1d8a0f0badbc9cff9
+        let test_cases = [
+            "8/8/8/2k5/2pP4/8/B7/4K3 b - d3 0 3",
+            "r6r/1b2k1bq/8/8/7B/8/8/R3K2R b KQ - 3 2",
+            "r1bqkbnr/pppppppp/n7/8/8/P7/1PPPPPPP/RNBQKBNR w KQkq - 2 2",
+            "r3k2r/p1pp1pb1/bn2Qnp1/2qPN3/1p2P3/2N5/PPPBBPPP/R3K2R b KQkq - 3 2",
+            "2kr3r/p1ppqpb1/bn2Qnp1/3PN3/1p2P3/2N5/PPPBBPPP/R3K2R b KQ - 3 2",
+            "rnb2k1r/pp1Pbppp/2p5/q7/2B5/8/PPPQNnPP/RNB1K2R w KQ - 3 9",
+            "2r5/3pk3/8/2P5/8/2K5/8/8 w - - 5 4",
+            "rnbq1k1r/pp1Pbppp/2p5/8/2B5/8/PPP1NnPP/RNBQK2R w KQ - 1 8",
+            "r4rk1/1pp1qppp/p1np1n2/2b1p1B1/2B1P1b1/P1NP1N2/1PP1QPPP/R4RK1 w - - 0 10",
+            "3k4/3p4/8/K1P4r/8/8/8/8 b - - 0 1",
+            "8/8/4k3/8/2p5/8/B2P2K1/8 w - - 0 1",
+            "8/8/1k6/2b5/2pP4/8/5K2/8 b - d3 0 1",
+            "5k2/8/8/8/8/8/8/4K2R w K - 0 1",
+            "3k4/8/8/8/8/8/8/R3K3 w Q - 0 1",
+            "r3k2r/1b4bq/8/8/8/8/7B/R3K2R w KQkq - 0 1",
+            "r3k2r/8/3Q4/8/8/5q2/8/R3K2R b KQkq - 0 1",
+            "2K2r2/4P3/8/8/8/8/8/3k4 w - - 0 1",
+            "8/8/1P2K3/8/2n5/1q6/8/5k2 b - - 0 1",
+            "4k3/1P6/8/8/8/8/K7/8 w - - 0 1",
+            "8/P1k5/K7/8/8/8/8/8 w - - 0 1",
+            "K1k5/8/P7/8/8/8/8/8 w - - 0 1",
+            "8/k1P5/8/1K6/8/8/8/8 w - - 0 1",
+            "8/8/2k5/5q2/5n2/8/5K2/8 b - - 0 1",
+        ];
+
+        for (i, fen1) in test_cases.iter().enumerate() {
+            println!("fen1: {fen1:?}");
+            let fen2 = BoardState::from_fen(fen1.to_string()).unwrap().to_fen();
+
+            assert_eq!(fen1.to_string(), fen2, "FEN not equivalent")
+        } 
     }
 }
