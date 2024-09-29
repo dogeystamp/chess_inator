@@ -111,18 +111,19 @@ impl ColPiece {
 struct Square(usize);
 
 #[derive(Debug)]
-enum IndexError {
+enum SquareError {
     OutOfBounds,
+    InvalidCharacter(char),
 }
 
 impl TryFrom<usize> for Square {
-    type Error = IndexError;
+    type Error = SquareError;
 
     fn try_from(value: usize) -> Result<Self, Self::Error> {
         if (0..N_SQUARES).contains(&value) {
             Ok(Square(value))
         } else {
-            Err(IndexError::OutOfBounds)
+            Err(SquareError::OutOfBounds)
         }
     }
 }
@@ -132,7 +133,7 @@ impl From<Square> for usize {
     }
 }
 impl Square {
-    fn from_row_col(r: usize, c: usize) -> Result<Self, IndexError> {
+    fn from_row_col(r: usize, c: usize) -> Result<Self, SquareError> {
         //! Get index of square based on row and column.
         let ret = BOARD_WIDTH * r + c;
         ret.try_into()
@@ -154,6 +155,27 @@ impl Square {
         let file = letters[col];
         format!("{file}{rank}")
     }
+
+    /// Convert typical human-readable form (e.g. `e4`) to square index.
+    fn from_algebraic(value: String) -> Result<Self, SquareError> {
+        let bytes = value.as_bytes();
+        let col = match bytes[0] as char {
+            'a' => 0,
+            'b' => 1,
+            'c' => 2,
+            'd' => 3,
+            'e' => 4,
+            'f' => 5,
+            'g' => 6,
+            'h' => 7,
+            _ => {return Err(SquareError::InvalidCharacter(bytes[0] as char))}
+        };
+        if let Some(row) = (bytes[1] as char).to_digit(10) {
+            Square::from_row_col(row as usize - 1, col as usize)
+        } else {
+            Err(SquareError::InvalidCharacter(bytes[1] as char))
+        }
+    }
 }
 
 #[cfg(test)]
@@ -161,9 +183,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_to_algebraic() {
-        for (sqr, idx) in [("a1", 0), ("a8", 56), ("h1", 7), ("h8", 63)] {
-            assert_eq!(Square::try_from(idx).unwrap().to_algebraic(), sqr)
+    fn test_to_from_algebraic() {
+        let test_cases = [("a1", 0), ("a8", 56), ("h1", 7), ("h8", 63)];
+        for (sqr, idx) in test_cases {
+            assert_eq!(Square::try_from(idx).unwrap().to_algebraic(), sqr);
+            assert_eq!(Square::from_algebraic(sqr.to_string()).unwrap(), Square::try_from(idx).unwrap());
         }
     }
 }

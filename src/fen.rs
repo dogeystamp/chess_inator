@@ -1,5 +1,7 @@
 use crate::{BoardState, CastleRights, ColPiece, Color, Square, BOARD_HEIGHT, BOARD_WIDTH};
 
+pub const START_POSITION: &str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+
 pub trait FromFen {
     type Error;
     fn from_fen(_: String) -> Result<Self, Self::Error>
