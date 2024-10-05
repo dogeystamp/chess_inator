@@ -110,19 +110,25 @@ impl Move {
             MoveType::Normal => {
                 let pc_src = pc_src!(self);
                 pc_asserts!(pc_src, self);
+
+                let pc_dest: Option<ColPiece> = node.pos.get_piece(self.dest);
+
                 if matches!(pc_src.pc, Piece::Pawn) {
                     // pawn moves are irreversible
                     node.pos.half_moves = 0;
 
-                    // en-passant
-                    if self.src.0 + (BOARD_WIDTH) * 2 == self.dest.0 {
+                    let (src_row, src_col) = self.src.to_row_col();
+                    let (dest_row, dest_col) = self.dest.to_row_col();
+
+                    // set en-passant target square
+                    if src_row.abs_diff(dest_row) == 2 {
+                        let new_idx = match pc_src.col {
+                            Color::White => { self.src.0 + BOARD_WIDTH },
+                            Color::Black => { self.src.0 - BOARD_WIDTH },
+                        };
                         node.pos.ep_square = Some(
-                            Square::try_from(self.src.0 + BOARD_WIDTH)
-                                .expect("En-passant target should be valid."),
-                        )
-                    } else if self.dest.0 + (BOARD_WIDTH) * 2 == self.src.0 {
-                        node.pos.ep_square = Some(
-                            Square::try_from(self.src.0 - BOARD_WIDTH)
+                        // TODO: fix the en passant targetsquare
+                            Square::try_from(new_idx)
                                 .expect("En-passant target should be valid."),
                         )
                     } else {
@@ -131,6 +137,11 @@ impl Move {
                 } else {
                     node.pos.half_moves += 1;
                     node.pos.ep_square = None;
+                }
+
+                if pc_dest.is_some() {
+                    // captures are irreversible
+                    node.pos.half_moves = 0;
                 }
 
                 let castle = &mut node.pos.castle.0[pc_src.col as usize];
@@ -155,11 +166,6 @@ impl Move {
                             };
                         }
                     }
-                }
-
-                if let Some(_pc_dest) = node.pos.get_piece(self.dest) {
-                    // captures are irreversible
-                    node.pos.half_moves = 0;
                 }
 
                 node.pos.del_piece(self.src);
@@ -243,7 +249,7 @@ impl FromUCIAlgebraic for Move {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fen::{START_POSITION, ToFen};
+    use crate::fen::{ToFen, START_POSITION};
 
     /// Test that make move and unmake move work as expected.
     ///
@@ -321,14 +327,8 @@ mod tests {
             (
                 "4k3/6P1/8/8/8/8/1p6/4K3 w - - 0 1",
                 vec![
-                    (
-                        "g7g8n",
-                        "4k1N1/8/8/8/8/8/1p6/4K3 b - - 0 1",
-                    ),
-                    (
-                        "b2b1q",
-                        "4k1N1/8/8/8/8/8/8/1q2K3 w - - 0 2",
-                    ),
+                    ("g7g8n", "4k1N1/8/8/8/8/8/1p6/4K3 b - - 0 1"),
+                    ("b2b1q", "4k1N1/8/8/8/8/8/8/1q2K3 w - - 0 2"),
                 ],
             ),
         ];
