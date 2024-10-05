@@ -317,6 +317,20 @@ mod tests {
                     ),
                 ],
             ),
+            // pawn promotion test
+            (
+                "4k3/6P1/8/8/8/8/1p6/4K3 w - - 0 1",
+                vec![
+                    (
+                        "g7g8n",
+                        "4k1N1/8/8/8/8/8/1p6/4K3 b - - 0 1",
+                    ),
+                    (
+                        "b2b1q",
+                        "4k1N1/8/8/8/8/8/8/1q2K3 w - - 0 2",
+                    ),
+                ],
+            ),
         ];
 
         for (i, test_case) in test_cases.iter().enumerate() {
