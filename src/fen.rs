@@ -435,7 +435,7 @@ mod tests {
             "8/8/2k5/5q2/5n2/8/5K2/8 b - - 0 1",
         ];
 
-        for (i, fen1) in test_cases.iter().enumerate() {
+        for fen1 in test_cases {
             println!("fen1: {fen1:?}");
             let fen2 = BoardState::from_fen(fen1.to_string()).unwrap().to_fen();
 
