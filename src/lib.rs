@@ -34,7 +34,7 @@ impl From<Color> for char {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 enum Piece {
     Rook,
     Bishop,
@@ -157,7 +157,7 @@ impl Square {
     }
 
     /// Convert typical human-readable form (e.g. `e4`) to square index.
-    fn from_algebraic(value: String) -> Result<Self, SquareError> {
+    fn from_algebraic(value: &str) -> Result<Self, SquareError> {
         let bytes = value.as_bytes();
         let col = match bytes[0] as char {
             'a' => 0,
@@ -187,7 +187,7 @@ mod tests {
         let test_cases = [("a1", 0), ("a8", 56), ("h1", 7), ("h8", 63)];
         for (sqr, idx) in test_cases {
             assert_eq!(Square::try_from(idx).unwrap().to_algebraic(), sqr);
-            assert_eq!(Square::from_algebraic(sqr.to_string()).unwrap(), Square::try_from(idx).unwrap());
+            assert_eq!(Square::from_algebraic(sqr).unwrap(), Square::try_from(idx).unwrap());
         }
     }
 }

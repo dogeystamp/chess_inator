@@ -1,7 +1,7 @@
 //! Move generation.
 
 use crate::fen::{FromFen, ToFen, START_POSITION};
-use crate::{BoardState, Color, Piece, Square, BOARD_HEIGHT, BOARD_WIDTH, N_SQUARES};
+use crate::{BoardState, ColPiece, Color, Piece, Square, BOARD_HEIGHT, BOARD_WIDTH, N_SQUARES};
 use std::rc::Rc;
 
 /// Game tree node.
@@ -30,6 +30,17 @@ enum PromotePiece {
     Bishop,
     Knight,
     Queen,
+}
+
+impl From<PromotePiece> for Piece {
+    fn from(value: PromotePiece) -> Self {
+        match value {
+            PromotePiece::Rook => Piece::Rook,
+            PromotePiece::Bishop => Piece::Bishop,
+            PromotePiece::Knight => Piece::Knight,
+            PromotePiece::Queen => Piece::Queen,
+        }
+    }
 }
 
 /// Move data common to all move types.
@@ -61,16 +72,46 @@ impl Move {
             prev: Some(Rc::new(old_node)),
             pos: old_pos,
         };
-        node.pos.turn = node.pos.turn.flip();
-        if node.pos.turn == Color::White {
+
+        if old_pos.turn == Color::Black {
             node.pos.full_moves += 1;
         }
 
+        /// Get the piece at the source square.
+        macro_rules! pc_src {
+            ($data: ident) => {
+                node.pos
+                    .get_piece($data.src)
+                    .expect("Move source should have a piece")
+            };
+        }
+        /// Perform sanity checks.
+        macro_rules! pc_asserts {
+            ($pc_src: ident, $data: ident) => {
+                debug_assert_eq!($pc_src.col, node.pos.turn, "Moving piece on wrong turn.");
+                debug_assert_ne!($data.src, $data.dest, "Moving piece to itself.");
+            };
+        }
+
         match self {
-            Move::Promotion(data, piece) => todo!(),
+            Move::Promotion(data, to_piece) => {
+                let pc_src = pc_src!(data);
+                pc_asserts!(pc_src, data);
+                debug_assert_eq!(pc_src.pc, Piece::Pawn);
+
+                node.pos.del_piece(data.src);
+                node.pos.set_piece(
+                    data.dest,
+                    ColPiece {
+                        pc: Piece::from(to_piece),
+                        col: pc_src.col,
+                    },
+                );
+            }
             Move::Castle(data) => todo!(),
             Move::Normal(data) => {
-                let pc_src = node.pos.get_piece(data.src).unwrap();
+                let pc_src = pc_src!(data);
+                pc_asserts!(pc_src, data);
                 if matches!(pc_src.pc, Piece::Pawn) {
                     // pawn moves are irreversible
                     node.pos.half_moves = 0;
@@ -128,6 +169,8 @@ impl Move {
             }
             Move::EnPassant(data) => todo!(),
         }
+
+        node.pos.turn = node.pos.turn.flip();
 
         node
     }
@@ -229,11 +272,14 @@ mod tests {
 
             // make move
             println!("Starting test case {i}, make move.");
-            let mut node = Node {pos: BoardState::from_fen(start_pos.to_string()).unwrap(), prev: None};
+            let mut node = Node {
+                pos: BoardState::from_fen(start_pos.to_string()).unwrap(),
+                prev: None,
+            };
             for (src, dest, expect_fen) in moves {
                 println!("Moving {src} to {dest}.");
-                let idx_src = Square::from_algebraic(src.to_string()).unwrap();
-                let idx_dest = Square::from_algebraic(dest.to_string()).unwrap();
+                let idx_src = Square::from_algebraic(src).unwrap();
+                let idx_dest = Square::from_algebraic(dest).unwrap();
                 let mv = Move::Normal(MoveData {
                     src: idx_src,
                     dest: idx_dest,
