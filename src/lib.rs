@@ -111,7 +111,7 @@ impl ColPiece {
 struct Square(usize);
 
 #[derive(Debug)]
-enum SquareError {
+pub enum SquareError {
     OutOfBounds,
     InvalidCharacter(char),
 }
