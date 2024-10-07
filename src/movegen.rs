@@ -98,7 +98,7 @@ impl Move {
                 pc_asserts!(pc_src, self);
                 debug_assert_eq!(pc_src.pc, Piece::Pawn);
 
-                node.pos.del_piece(self.src);
+                node.pos.del_piece(self.src).expect("Move source should have piece.");
                 node.pos.set_piece(
                     self.dest,
                     ColPiece {
@@ -127,12 +127,22 @@ impl Move {
                             Color::Black => { self.src.0 - BOARD_WIDTH },
                         };
                         node.pos.ep_square = Some(
-                        // TODO: fix the en passant targetsquare
                             Square::try_from(new_idx)
                                 .expect("En-passant target should be valid."),
                         )
                     } else {
                         node.pos.ep_square = None;
+                        if pc_dest.is_none() && src_col != dest_col {
+                            // we took en passant
+                            debug_assert!(src_row.abs_diff(dest_row) == 1);
+                            debug_assert_eq!(self.dest, old_pos.ep_square.unwrap());
+                            // square to actually capture at
+                            let ep_capture = Square::try_from(match pc_src.col {
+                                Color::White => { self.dest.0 - BOARD_WIDTH },
+                                Color::Black => { self.dest.0 + BOARD_WIDTH },
+                            }).expect("En-passant capture square should be valid.");
+                            node.pos.del_piece(ep_capture).expect("En-passant capture square should have piece.");
+                        }
                     }
                 } else {
                     node.pos.half_moves += 1;
@@ -168,7 +178,7 @@ impl Move {
                     }
                 }
 
-                node.pos.del_piece(self.src);
+                node.pos.del_piece(self.src).expect("Move source should have piece.");
                 node.pos.set_piece(self.dest, pc_src);
             }
         }
@@ -329,6 +339,17 @@ mod tests {
                 vec![
                     ("g7g8n", "4k1N1/8/8/8/8/8/1p6/4K3 b - - 0 1"),
                     ("b2b1q", "4k1N1/8/8/8/8/8/8/1q2K3 w - - 0 2"),
+                ],
+            ),
+            // en passant test
+            (
+                "k7/4p3/8/3P4/3p4/8/4P3/K7 w - - 0 1",
+                vec![
+                    ("e2e4", "k7/4p3/8/3P4/3pP3/8/8/K7 b - e3 0 1"),
+                    ("d4e3", "k7/4p3/8/3P4/8/4p3/8/K7 w - - 0 2"),
+                    ("a1b1", "k7/4p3/8/3P4/8/4p3/8/1K6 b - - 1 2"),
+                    ("e7e5", "k7/8/8/3Pp3/8/4p3/8/1K6 w - e6 0 3"),
+                    ("d5e6", "k7/8/4P3/8/8/4p3/8/1K6 b - - 0 3"),
                 ],
             ),
         ];

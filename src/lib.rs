@@ -168,7 +168,7 @@ impl Square {
             'f' => 5,
             'g' => 6,
             'h' => 7,
-            _ => {return Err(SquareError::InvalidCharacter(bytes[0] as char))}
+            _ => return Err(SquareError::InvalidCharacter(bytes[0] as char)),
         };
         if let Some(row) = (bytes[1] as char).to_digit(10) {
             Square::from_row_col(row as usize - 1, col as usize)
@@ -187,7 +187,10 @@ mod tests {
         let test_cases = [("a1", 0), ("a8", 56), ("h1", 7), ("h8", 63)];
         for (sqr, idx) in test_cases {
             assert_eq!(Square::try_from(idx).unwrap().to_algebraic(), sqr);
-            assert_eq!(Square::from_algebraic(sqr).unwrap(), Square::try_from(idx).unwrap());
+            assert_eq!(
+                Square::from_algebraic(sqr).unwrap(),
+                Square::try_from(idx).unwrap()
+            );
         }
     }
 }
@@ -339,6 +342,10 @@ pub struct BoardState {
     turn: Color,
 }
 
+/// Piece missing where there should be one.
+#[derive(Debug)]
+struct NoPieceError;
+
 impl BoardState {
     /// Get mutable reference to a player.
     fn pl_mut(&mut self, col: Color) -> &mut Player {
@@ -352,12 +359,17 @@ impl BoardState {
         *self.mail.sq_mut(idx) = Some(pc);
     }
 
-    /// Delete the piece in a location, if it exists.
-    fn del_piece(&mut self, idx: Square) {
+    /// Delete the piece in a location.
+    ///
+    /// Returns an error if there is no piece in the location.
+    fn del_piece(&mut self, idx: Square) -> Result<(), NoPieceError> {
         if let Some(pc) = *self.mail.sq_mut(idx) {
             let pl = self.pl_mut(pc.col);
             pl.board(pc.into()).off_idx(idx);
             *self.mail.sq_mut(idx) = None;
+            Ok(())
+        } else {
+            Err(NoPieceError)
         }
     }
 
