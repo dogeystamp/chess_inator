@@ -113,12 +113,12 @@ impl Move {
 
                 let pc_dest: Option<ColPiece> = node.pos.get_piece(self.dest);
 
+                let (src_row, src_col) = self.src.to_row_col();
+                let (dest_row, dest_col) = self.dest.to_row_col();
+
                 if matches!(pc_src.pc, Piece::Pawn) {
                     // pawn moves are irreversible
                     node.pos.half_moves = 0;
-
-                    let (src_row, src_col) = self.src.to_row_col();
-                    let (dest_row, dest_col) = self.dest.to_row_col();
 
                     // set en-passant target square
                     if src_row.abs_diff(dest_row) == 2 {
@@ -155,11 +155,19 @@ impl Move {
                 }
 
                 let castle = &mut node.pos.castle.0[pc_src.col as usize];
-                // forfeit castling rights
                 if matches!(pc_src.pc, Piece::King) {
+                    // forfeit castling rights
                     castle.k = false;
                     castle.q = false;
+
+                    // and maybe perform a castle
+                    let horiz_diff = src_col.abs_diff(dest_col);
+                    if horiz_diff == 2 {
+                        todo!("castling");
+                    }
+                    debug_assert!((0..=2).contains(&horiz_diff), "king moved horizontally {} squares", horiz_diff);
                 } else if matches!(pc_src.pc, Piece::Rook) {
+                    // forfeit castling rights
                     match pc_src.col {
                         Color::White => {
                             if self.src == Square(0) {
@@ -350,6 +358,22 @@ mod tests {
                     ("a1b1", "k7/4p3/8/3P4/8/4p3/8/1K6 b - - 1 2"),
                     ("e7e5", "k7/8/8/3Pp3/8/4p3/8/1K6 w - e6 0 3"),
                     ("d5e6", "k7/8/4P3/8/8/4p3/8/1K6 b - - 0 3"),
+                ],
+            ),
+            // castle test (white kingside, black queenside)
+            (
+                "r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1",
+                vec![
+                    ("e1g1", "r3k2r/8/8/8/8/8/8/R4RK1 b kq - 1 1"),
+                    ("e8c8", "2kr3r/8/8/8/8/8/8/R4RK1 w - - 2 2"),
+                ],
+            ),
+            // castle test (white queenside, black kingside)
+            (
+                "r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1",
+                vec![
+                    ("e1c1", "r3k2r/8/8/8/8/8/8/2KR3R b kq - 1 1"),
+                    ("e8g8", "r4rk1/8/8/8/8/8/8/2KR3R w - - 2 2"),
                 ],
             ),
         ];
