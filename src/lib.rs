@@ -359,18 +359,23 @@ impl BoardState {
         *self.mail.sq_mut(idx) = Some(pc);
     }
 
-    /// Delete the piece in a location.
+    /// Delete the piece in a location, and return ("pop") that piece.
     ///
     /// Returns an error if there is no piece in the location.
-    fn del_piece(&mut self, idx: Square) -> Result<(), NoPieceError> {
+    fn del_piece(&mut self, idx: Square) -> Result<ColPiece, NoPieceError> {
         if let Some(pc) = *self.mail.sq_mut(idx) {
             let pl = self.pl_mut(pc.col);
             pl.board(pc.into()).off_idx(idx);
             *self.mail.sq_mut(idx) = None;
-            Ok(())
+            Ok(pc)
         } else {
             Err(NoPieceError)
         }
+    }
+
+    fn move_piece(&mut self, src: Square, dest: Square) {
+        let pc = self.del_piece(src).expect("Move source should have piece.");
+        self.set_piece(dest, pc);
     }
 
     /// Get the piece at a location.

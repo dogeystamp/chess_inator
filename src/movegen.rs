@@ -65,6 +65,7 @@ impl Move {
     /// Make move and return new position.
     ///
     /// Old position is saved in a backlink.
+    /// No checking is done to verify even pseudo-legality of the move.
     pub fn make(self, old_node: Node) -> Node {
         let old_pos = old_node.pos;
         let mut node = Node {
@@ -98,14 +99,14 @@ impl Move {
                 pc_asserts!(pc_src, self);
                 debug_assert_eq!(pc_src.pc, Piece::Pawn);
 
-                node.pos.del_piece(self.src).expect("Move source should have piece.");
+                let _ = node.pos.del_piece(self.src);
                 node.pos.set_piece(
                     self.dest,
                     ColPiece {
                         pc: Piece::from(to_piece),
                         col: pc_src.col,
                     },
-                );
+                )
             }
             MoveType::Normal => {
                 let pc_src = pc_src!(self);
@@ -123,12 +124,11 @@ impl Move {
                     // set en-passant target square
                     if src_row.abs_diff(dest_row) == 2 {
                         let new_idx = match pc_src.col {
-                            Color::White => { self.src.0 + BOARD_WIDTH },
-                            Color::Black => { self.src.0 - BOARD_WIDTH },
+                            Color::White => self.src.0 + BOARD_WIDTH,
+                            Color::Black => self.src.0 - BOARD_WIDTH,
                         };
                         node.pos.ep_square = Some(
-                            Square::try_from(new_idx)
-                                .expect("En-passant target should be valid."),
+                            Square::try_from(new_idx).expect("En-passant target should be valid."),
                         )
                     } else {
                         node.pos.ep_square = None;
@@ -138,10 +138,13 @@ impl Move {
                             debug_assert_eq!(self.dest, old_pos.ep_square.unwrap());
                             // square to actually capture at
                             let ep_capture = Square::try_from(match pc_src.col {
-                                Color::White => { self.dest.0 - BOARD_WIDTH },
-                                Color::Black => { self.dest.0 + BOARD_WIDTH },
-                            }).expect("En-passant capture square should be valid.");
-                            node.pos.del_piece(ep_capture).expect("En-passant capture square should have piece.");
+                                Color::White => self.dest.0 - BOARD_WIDTH,
+                                Color::Black => self.dest.0 + BOARD_WIDTH,
+                            })
+                            .expect("En-passant capture square should be valid.");
+                            node.pos
+                                .del_piece(ep_capture)
+                                .expect("En-passant capture square should have piece.");
                         }
                     }
                 } else {
@@ -163,9 +166,28 @@ impl Move {
                     // and maybe perform a castle
                     let horiz_diff = src_col.abs_diff(dest_col);
                     if horiz_diff == 2 {
-                        todo!("castling");
+                        let rook_row = src_row;
+                        let rook_src_col = if src_col > dest_col {
+                            0
+                        } else {
+                            BOARD_WIDTH - 1
+                        };
+                        let rook_dest_col = if src_col > dest_col {
+                            dest_col + 1
+                        } else {
+                            dest_col - 1
+                        };
+                        let rook_src = Square::from_row_col(rook_row, rook_src_col)
+                            .expect("rook castling src square should be valid");
+                        let rook_dest = Square::from_row_col(rook_row, rook_dest_col)
+                            .expect("rook castling dest square should be valid");
+                        node.pos.move_piece(rook_src, rook_dest);
                     }
-                    debug_assert!((0..=2).contains(&horiz_diff), "king moved horizontally {} squares", horiz_diff);
+                    debug_assert!(
+                        (0..=2).contains(&horiz_diff),
+                        "king moved horizontally {} squares",
+                        horiz_diff
+                    );
                 } else if matches!(pc_src.pc, Piece::Rook) {
                     // forfeit castling rights
                     match pc_src.col {
@@ -186,8 +208,7 @@ impl Move {
                     }
                 }
 
-                node.pos.del_piece(self.src).expect("Move source should have piece.");
-                node.pos.set_piece(self.dest, pc_src);
+                node.pos.move_piece(self.src, self.dest);
             }
         }
 
