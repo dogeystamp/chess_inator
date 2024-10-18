@@ -178,23 +178,6 @@ impl Square {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_to_from_algebraic() {
-        let test_cases = [("a1", 0), ("a8", 56), ("h1", 7), ("h8", 63)];
-        for (sqr, idx) in test_cases {
-            assert_eq!(Square::try_from(idx).unwrap().to_algebraic(), sqr);
-            assert_eq!(
-                Square::from_algebraic(sqr).unwrap(),
-                Square::try_from(idx).unwrap()
-            );
-        }
-    }
-}
-
 impl TryFrom<char> for Piece {
     type Error = PieceErr;
 
@@ -236,6 +219,39 @@ impl Bitboard {
     pub fn off_idx(&mut self, idx: Square) {
         //! Set the square at an index to off.
         self.0 &= !(1 << usize::from(idx));
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0 == 0
+    }
+}
+
+impl IntoIterator for Bitboard {
+    type Item = Square;
+
+    type IntoIter = BitboardIterator;
+
+    fn into_iter(self) -> Self::IntoIter {
+        BitboardIterator { remaining: self }
+    }
+}
+
+struct BitboardIterator {
+    remaining: Bitboard,
+}
+
+impl Iterator for BitboardIterator {
+    type Item = Square;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.remaining.is_empty() {
+            None
+        } else {
+            let next_idx = self.remaining.0.trailing_zeros() as usize;
+            let sq = Square(next_idx);
+            self.remaining.off_idx(sq);
+            Some(sq)
+        }
     }
 }
 
@@ -399,5 +415,43 @@ impl core::fmt::Display for BoardState {
             str += "\n";
         }
         write!(f, "{}", str)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_to_from_algebraic() {
+        let test_cases = [("a1", 0), ("a8", 56), ("h1", 7), ("h8", 63)];
+        for (sqr, idx) in test_cases {
+            assert_eq!(Square::try_from(idx).unwrap().to_algebraic(), sqr);
+            assert_eq!(
+                Square::from_algebraic(sqr).unwrap(),
+                Square::try_from(idx).unwrap()
+            );
+        }
+    }
+
+    #[test]
+    fn test_bitboard_iteration() {
+        let indices = [
+            0usize, 5usize, 17usize, 24usize, 34usize, 39usize, 42usize, 45usize, 49usize, 50usize,
+            63usize,
+        ];
+
+        let mut bitboard = Bitboard::default();
+
+        let squares = indices.map(Square);
+        for sq in squares {
+            bitboard.on_idx(sq);
+        }
+        // ensure that iteration does not consume the board
+        for _ in 0..=1 {
+            for (i, sq) in bitboard.into_iter().enumerate() {
+                assert_eq!(squares[i], sq)
+            }
+        }
     }
 }
