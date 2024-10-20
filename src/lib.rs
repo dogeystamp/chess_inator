@@ -548,7 +548,11 @@ mod tests {
         }
 
         let board = BoardState::from_fen("8/4p3/1q1Q1p2/4p3/1p1r4/8/8/8 w - - 0 1").unwrap();
-        let white_queens = board.pl(Color::White).board(Piece::Queen).into_iter().collect::<Vec<Square>>();
+        let white_queens = board
+            .pl(Color::White)
+            .board(Piece::Queen)
+            .into_iter()
+            .collect::<Vec<Square>>();
         assert_eq!(white_queens, vec![Square::from_str("d6").unwrap()])
     }
 }

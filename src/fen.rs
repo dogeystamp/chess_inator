@@ -440,6 +440,6 @@ mod tests {
             let fen2 = BoardState::from_fen(fen1).unwrap().to_fen();
 
             assert_eq!(fen1.to_string(), fen2, "FEN not equivalent")
-        } 
+        }
     }
 }
