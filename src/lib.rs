@@ -425,6 +425,16 @@ impl BoardState {
         &self.players[col as usize]
     }
 
+    /// Get immutable reference to castling rights.
+    fn pl_castle(&self, col: Color) -> &CastlePlayer {
+        &self.castle.0[col as usize]
+    }
+
+    /// Get mutable reference to castling rights.
+    fn pl_castle_mut(&mut self, col: Color) -> &mut CastlePlayer {
+        &mut self.castle.0[col as usize]
+    }
+
     /// Create a new piece in a location.
     fn set_piece(&mut self, idx: Square, pc: ColPiece) {
         let pl = self.pl_mut(pc.col);

@@ -157,7 +157,7 @@ impl Move {
                     node.pos.half_moves = 0;
                 }
 
-                let castle = &mut node.pos.castle.0[pc_src.col as usize];
+                let castle = &mut node.pos.pl_castle_mut(pc_src.col);
                 if matches!(pc_src.pc, Piece::King) {
                     // forfeit castling rights
                     castle.k = false;
@@ -389,8 +389,49 @@ impl PseudoMoveGen for BoardState {
         for sq in squares!(Queen) {
             move_slider(&self, sq, &mut ret, SliderDirection::Star, true);
         }
-        for sq in squares!(King) {
-            move_slider(&self, sq, &mut ret, SliderDirection::Star, false);
+        for src in squares!(King) {
+            move_slider(&self, src, &mut ret, SliderDirection::Star, false);
+            let (r, c) = src.to_row_col();
+            let rights = self.pl_castle(self.turn);
+            let castle_sides = [(rights.k, 2, BOARD_WIDTH - 1), (rights.q, -2, 0)];
+            for (is_allowed, move_offset, endpoint) in castle_sides {
+                if !is_allowed {
+                    continue;
+                }
+
+                let range = if c < endpoint {
+                    (c + 1)..endpoint
+                } else {
+                    (endpoint + 1)..c
+                };
+
+                debug_assert_ne!(
+                    range.len(),
+                    0,
+                    "c {:?}, endpoint {:?}, range {:?}",
+                    c,
+                    endpoint,
+                    range
+                );
+
+                let mut range_squares = range.map(|nc| Square::from_row_col(r, nc).unwrap());
+                debug_assert_ne!(range_squares.len(), 0);
+
+                // find first blocking piece
+                let is_path_blocked = range_squares.find_map(|sq| self.get_piece(sq)).is_some();
+                if is_path_blocked {
+                    continue;
+                }
+
+                let nc: isize = c.try_into().unwrap();
+                let dest = Square::from_row_col_signed(r.try_into().unwrap(), nc + move_offset)
+                    .expect("Castle destination square should be valid");
+                ret.push(Move {
+                    src,
+                    dest,
+                    move_type: MoveType::Normal,
+                })
+            }
         }
         for src in squares!(Pawn) {
             let (r, c) = src.to_row_col();
@@ -527,6 +568,66 @@ mod tests {
                     ],
                     MoveType::Normal,
                 )],
+            ),
+            // white castle test (blocked)
+            (
+                "8/8/8/8/8/8/r6r/R3Kn1R w KQ - 0 1",
+                vec![
+                    // NOTE: pseudo-legal e1
+                    ("a1", vec!["b1", "a2", "c1", "d1", "e1"], MoveType::Normal),
+                    // NOTE: pseudo-legal f1
+                    ("h1", vec!["g1", "f1", "h2"], MoveType::Normal),
+                    // NOTE: pseudo-legal d2, e2, f2, f1
+                    (
+                        "e1",
+                        vec!["c1", "d1", "f1", "d2", "e2", "f2"],
+                        MoveType::Normal,
+                    ),
+                ],
+            ),
+            // white castle test (no rights, blocked)
+            (
+                "8/8/8/8/8/8/r6r/R3Kn1R w K - 0 1",
+                vec![
+                    // NOTE: pseudo-legal e1
+                    ("a1", vec!["b1", "a2", "c1", "d1", "e1"], MoveType::Normal),
+                    // NOTE: pseudo-legal f1
+                    ("h1", vec!["g1", "f1", "h2"], MoveType::Normal),
+                    // NOTE: pseudo-legal d2, e2, f2, f1
+                    ("e1", vec!["d1", "f1", "d2", "e2", "f2"], MoveType::Normal),
+                ],
+            ),
+            // white castle test
+            (
+                "8/8/8/8/8/8/r6r/R3K2R w KQ - 0 1",
+                vec![
+                    // NOTE: pseudo-legal e1
+                    ("a1", vec!["b1", "a2", "c1", "d1", "e1"], MoveType::Normal),
+                    // NOTE: pseudo-legal e1
+                    ("h1", vec!["g1", "f1", "e1", "h2"], MoveType::Normal),
+                    // NOTE: pseudo-legal d2, e2, f2
+                    (
+                        "e1",
+                        vec!["g1", "c1", "d1", "f1", "d2", "e2", "f2"],
+                        MoveType::Normal,
+                    ),
+                ],
+            ),
+            // black castle test
+            (
+                "r3k2r/R6R/8/8/8/8/8/8 b kq - 0 1",
+                vec![
+                    // NOTE: pseudo-legal e8
+                    ("a8", vec!["b8", "a7", "c8", "d8", "e8"], MoveType::Normal),
+                    // NOTE: pseudo-legal e8
+                    ("h8", vec!["g8", "f8", "e8", "h7"], MoveType::Normal),
+                    // NOTE: pseudo-legal d7, e7, f7
+                    (
+                        "e8",
+                        vec!["g8", "c8", "d8", "f8", "d7", "e7", "f7"],
+                        MoveType::Normal,
+                    ),
+                ],
             ),
             // horse test
             (
