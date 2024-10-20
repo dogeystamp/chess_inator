@@ -533,22 +533,14 @@ mod tests {
                 "8/2r1r3/1n3q2/3N4/8/2p5/8/8 w - - 0 1",
                 vec![(
                     "d5",
-                    vec![
-                        "f6", "e7", "c7", "b6", "b4", "c3", "e3", "f4",
-                    ],
+                    vec!["f6", "e7", "c7", "b6", "b4", "c3", "e3", "f4"],
                     MoveType::Normal,
                 )],
             ),
             // horse (blocked by boundary)
             (
                 "8/8/8/8/8/6n1/5n2/7N w - - 0 1",
-                vec![(
-                    "h1",
-                    vec![
-                        "f2", "g3"
-                    ],
-                    MoveType::Normal,
-                )],
+                vec![("h1", vec!["f2", "g3"], MoveType::Normal)],
             ),
             // white pawn promotion
             (
