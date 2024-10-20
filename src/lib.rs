@@ -6,6 +6,8 @@ use std::str::FromStr;
 pub mod fen;
 pub mod movegen;
 
+use fen::FromFen;
+
 const BOARD_WIDTH: usize = 8;
 const BOARD_HEIGHT: usize = 8;
 const N_SQUARES: usize = BOARD_WIDTH * BOARD_HEIGHT;
@@ -418,6 +420,11 @@ impl BoardState {
         &mut self.players[col as usize]
     }
 
+    /// Get immutable reference to a player.
+    fn pl(&self, col: Color) -> &Player {
+        &self.players[col as usize]
+    }
+
     /// Create a new piece in a location.
     fn set_piece(&mut self, idx: Square, pc: ColPiece) {
         let pl = self.pl_mut(pc.col);
@@ -539,5 +546,9 @@ mod tests {
                 assert_eq!(squares[i], sq)
             }
         }
+
+        let board = BoardState::from_fen("8/4p3/1q1Q1p2/4p3/1p1r4/8/8/8 w - - 0 1").unwrap();
+        let white_queens = board.pl(Color::White).board(Piece::Queen).into_iter().collect::<Vec<Square>>();
+        assert_eq!(white_queens, vec![Square::from_str("d6").unwrap()])
     }
 }

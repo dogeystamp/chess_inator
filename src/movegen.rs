@@ -354,7 +354,7 @@ fn move_slider(
                     move_type: MoveType::Normal,
                 });
 
-                // Stop at other pieces.
+                // stop at other pieces.
                 if let Some(_cap_pc) = board.get_piece(dest) {
                     break;
                 }
@@ -374,10 +374,23 @@ impl PseudoMoveGen for BoardState {
 
     fn gen_pseudo_moves(self) -> Self::MoveIterable {
         let mut ret = Vec::new();
-        for pl in self.players {
-            for sq in pl.board(Piece::Rook).into_iter() {
-                move_slider(&self, sq, &mut ret, SliderDirection::Straight, true);
-            }
+        let pl = self.pl(self.turn);
+        macro_rules! squares {
+            ($pc: ident) => {
+                pl.board(Piece::$pc).into_iter()
+            };
+        }
+        for sq in squares!(Rook) {
+            move_slider(&self, sq, &mut ret, SliderDirection::Straight, true);
+        }
+        for sq in squares!(Bishop) {
+            move_slider(&self, sq, &mut ret, SliderDirection::Diagonal, true);
+        }
+        for sq in squares!(Queen) {
+            move_slider(&self, sq, &mut ret, SliderDirection::Star, true);
+        }
+        for sq in squares!(King) {
+            move_slider(&self, sq, &mut ret, SliderDirection::Star, false);
         }
         ret
     }
@@ -398,6 +411,7 @@ mod tests {
     #[test]
     fn test_slider_movegen() {
         let test_cases = [
+            // rook test
             (
                 // start position
                 "8/8/8/8/8/8/8/R7 w - - 0 1",
@@ -413,15 +427,69 @@ mod tests {
                     MoveType::Normal,
                 )],
             ),
+            // king against the boundary
+            (
+                "3K4/4p3/1q3p2/4p3/1p1r4/8/8/8 w - - 0 1",
+                vec![("d8", vec!["c8", "c7", "d7", "e7", "e8"], MoveType::Normal)],
+            ),
+            // king test
+            (
+                "8/4p3/1q1K1p2/4p3/1p1r4/8/8/8 w - - 0 1",
+                vec![(
+                    "d6",
+                    vec!["c7", "c6", "c5", "d7", "d5", "e7", "e6", "e5"],
+                    MoveType::Normal,
+                )],
+            ),
+            // queen test
+            (
+                "8/4p3/1q1Q1p2/4p3/1p1r4/8/8/8 w - - 0 1",
+                vec![(
+                    "d6",
+                    vec![
+                        "d5", "d4", "d7", "d8", "e7", "c5", "b4", "e6", "f6", "c6", "b6", "e5",
+                        "c7", "b8",
+                    ],
+                    MoveType::Normal,
+                )],
+            ),
+            // rook test (again)
             (
                 "8/1p6/8/1R2p3/1p6/8/8/8 w - - 0 1",
                 vec![(
                     "b5",
-                    vec![
-                        "b6", "b7", "b4", "a5", "c5", "d5", "e5",
-                    ],
+                    vec!["b6", "b7", "b4", "a5", "c5", "d5", "e5"],
                     MoveType::Normal,
                 )],
+            ),
+            // bishop test
+            (
+                "8/4p3/3B4/4p3/1p6/8/8/8 w - - 0 1",
+                vec![(
+                    "d6",
+                    vec!["e5", "e7", "c5", "b4", "c7", "b8"],
+                    MoveType::Normal,
+                )],
+            ),
+            // black test
+            (
+                "8/3b4/2R1R3/1Q6/1RqRrR2/1QQ5/2R1R3/k7 b - - 0 1",
+                vec![
+                    ("a1", vec!["a2", "b2", "b1"], MoveType::Normal),
+                    (
+                        "c4",
+                        vec![
+                            "b3", "b4", "b5", "c3", "c5", "c6", "d3", "e2", "d4", "d5", "e6",
+                        ],
+                        MoveType::Normal,
+                    ),
+                    (
+                        "e4",
+                        vec!["d4", "f4", "e3", "e2", "e5", "e6"],
+                        MoveType::Normal,
+                    ),
+                    ("d7", vec!["c6", "e6", "c8", "e8"], MoveType::Normal),
+                ],
             ),
         ];
 
