@@ -290,8 +290,7 @@ impl FromUCIAlgebraic for Move {
 /// "Pseudo-legal" here means that moving into check is allowed, and capturing friendly pieces is
 /// allowed. These will be filtered out in the legal move generation step.
 pub trait PseudoMoveGen {
-    type MoveIterable;
-    fn gen_pseudo_moves(self) -> Self::MoveIterable;
+    fn gen_pseudo_moves(self) -> impl IntoIterator<Item = Move>;
 }
 
 const DIRS_STRAIGHT: [(isize, isize); 4] = [(0, 1), (1, 0), (-1, 0), (0, -1)];
@@ -379,9 +378,7 @@ fn move_slider(
 }
 
 impl PseudoMoveGen for BoardState {
-    type MoveIterable = Vec<Move>;
-
-    fn gen_pseudo_moves(self) -> Self::MoveIterable {
+    fn gen_pseudo_moves(self) -> impl IntoIterator<Item = Move> {
         let mut ret = Vec::new();
         let pl = self.pl(self.turn);
         macro_rules! squares {
@@ -540,8 +537,7 @@ impl PseudoMoveGen for BoardState {
 
 /// Legal move generation.
 pub trait LegalMoveGen {
-    type MoveIterable;
-    fn gen_moves(self) -> Self::MoveIterable;
+    fn gen_moves(self) -> impl IntoIterator<Item = Move>;
 }
 
 #[cfg(test)]
@@ -777,7 +773,7 @@ mod tests {
         for (fen, expected) in test_cases {
             let board = BoardState::from_fen(fen).unwrap();
 
-            let mut moves = board.gen_pseudo_moves();
+            let mut moves: Vec<Move> = board.gen_pseudo_moves().into_iter().collect();
             moves.sort_unstable();
             let moves = moves;
 
