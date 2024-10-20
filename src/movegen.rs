@@ -290,7 +290,7 @@ impl FromUCIAlgebraic for Move {
 /// "Pseudo-legal" here means that moving into check is allowed, and capturing friendly pieces is
 /// allowed. These will be filtered out in the legal move generation step.
 pub trait PseudoMoveGen {
-    fn gen_pseudo_moves(self) -> impl IntoIterator<Item = Move>;
+    fn gen_pseudo_moves(&self) -> impl IntoIterator<Item = Move>;
 }
 
 const DIRS_STRAIGHT: [(isize, isize); 4] = [(0, 1), (1, 0), (-1, 0), (0, -1)];
@@ -346,15 +346,15 @@ fn move_slider(
     };
 
     for dir in dirs {
-        let (mut r, mut c) = src.to_row_col();
+        let (mut r, mut c) = src.to_row_col_signed();
         loop {
             // increment
-            let nr = r as isize + dir.0;
-            let nc = c as isize + dir.1;
+            let nr = r + dir.0;
+            let nc = c + dir.1;
 
             if let Ok(dest) = Square::from_row_col_signed(nr, nc) {
-                r = nr as usize;
-                c = nc as usize;
+                r = nr;
+                c = nc;
 
                 move_list.push(Move {
                     src,
@@ -378,7 +378,7 @@ fn move_slider(
 }
 
 impl PseudoMoveGen for BoardState {
-    fn gen_pseudo_moves(self) -> impl IntoIterator<Item = Move> {
+    fn gen_pseudo_moves(&self) -> impl IntoIterator<Item = Move> {
         let mut ret = Vec::new();
         let pl = self.pl(self.turn);
         macro_rules! squares {
@@ -387,16 +387,16 @@ impl PseudoMoveGen for BoardState {
             };
         }
         for sq in squares!(Rook) {
-            move_slider(&self, sq, &mut ret, SliderDirection::Straight, true);
+            move_slider(self, sq, &mut ret, SliderDirection::Straight, true);
         }
         for sq in squares!(Bishop) {
-            move_slider(&self, sq, &mut ret, SliderDirection::Diagonal, true);
+            move_slider(self, sq, &mut ret, SliderDirection::Diagonal, true);
         }
         for sq in squares!(Queen) {
-            move_slider(&self, sq, &mut ret, SliderDirection::Star, true);
+            move_slider(self, sq, &mut ret, SliderDirection::Star, true);
         }
         for src in squares!(King) {
-            move_slider(&self, src, &mut ret, SliderDirection::Star, false);
+            move_slider(self, src, &mut ret, SliderDirection::Star, false);
             let (r, c) = src.to_row_col();
             let rights = self.pl_castle(self.turn);
             let castle_sides = [(rights.k, 2, BOARD_WIDTH - 1), (rights.q, -2, 0)];
@@ -440,14 +440,14 @@ impl PseudoMoveGen for BoardState {
             }
         }
         for src in squares!(Pawn) {
-            let (r, c) = src.to_row_col();
+            let (r, c) = src.to_row_col_signed();
 
             let last_row = match self.turn {
-                Color::White => BOARD_HEIGHT as isize - 1,
+                Color::White => isize::try_from(BOARD_HEIGHT).unwrap() - 1,
                 Color::Black => 0,
             };
 
-            let nr = (r as isize)
+            let nr = (r)
                 + match self.turn {
                     Color::White => 1,
                     Color::Black => -1,
@@ -477,7 +477,7 @@ impl PseudoMoveGen for BoardState {
 
             // capture
             for horiz in [-1, 1] {
-                let nc = c as isize + horiz;
+                let nc = c + horiz;
                 let dest = match Square::from_row_col_signed(nr, nc) {
                     Ok(sq) => sq,
                     Err(_) => continue,
@@ -488,7 +488,7 @@ impl PseudoMoveGen for BoardState {
             }
 
             // single push
-            let nc = c as isize;
+            let nc = c;
             let dest = match Square::from_row_col_signed(nr, nc) {
                 Ok(sq) => sq,
                 Err(_) => continue,
@@ -500,14 +500,14 @@ impl PseudoMoveGen for BoardState {
                 // double push
                 if r == match self.turn {
                     Color::White => 1,
-                    Color::Black => BOARD_HEIGHT - 2,
+                    Color::Black => isize::try_from(BOARD_HEIGHT).unwrap() - 2,
                 } {
-                    let nr = (r as isize)
+                    let nr = (r)
                         + match self.turn {
                             Color::White => 2,
                             Color::Black => -2,
                         };
-                    let nc = c as isize;
+                    let nc = c;
                     let dest = Square::from_row_col_signed(nr, nc)
                         .expect("Pawn double push should have valid destination");
                     if self.get_piece(dest).is_none() {
@@ -517,11 +517,11 @@ impl PseudoMoveGen for BoardState {
             }
         }
         for src in squares!(Knight) {
-            let (r, c) = src.to_row_col();
+            let (r, c) = src.to_row_col_signed();
 
             for dir in DIRS_KNIGHT {
-                let nr = r as isize + dir.0;
-                let nc = c as isize + dir.1;
+                let nr = r + dir.0;
+                let nc = c + dir.1;
                 if let Ok(dest) = Square::from_row_col_signed(nr, nc) {
                     ret.push(Move {
                         src,
@@ -537,7 +537,7 @@ impl PseudoMoveGen for BoardState {
 
 /// Legal move generation.
 pub trait LegalMoveGen {
-    fn gen_moves(self) -> impl IntoIterator<Item = Move>;
+    fn gen_moves(&self) -> impl IntoIterator<Item = Move>;
 }
 
 #[cfg(test)]

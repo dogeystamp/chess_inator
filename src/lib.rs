@@ -187,6 +187,11 @@ impl Square {
         assert!(rem <= 7);
         (div, rem)
     }
+    fn to_row_col_signed(self) -> (isize, isize) {
+        //! Get row, column (signed) from index
+        let (r, c) = self.to_row_col();
+        (r.try_into().unwrap(), c.try_into().unwrap())
+    }
 }
 
 impl Display for Square {
