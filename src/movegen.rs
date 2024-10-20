@@ -392,6 +392,68 @@ impl PseudoMoveGen for BoardState {
         for sq in squares!(King) {
             move_slider(&self, sq, &mut ret, SliderDirection::Star, false);
         }
+        for src in squares!(Pawn) {
+            let (r, c) = src.to_row_col();
+
+            let nr = (r as isize)
+                + match self.turn {
+                    Color::White => 1,
+                    Color::Black => -1,
+                };
+
+            // capture
+            for horiz in [-1, 1] {
+                let nc = c as isize + horiz;
+                let dest = match Square::from_row_col_signed(nr, nc) {
+                    Ok(sq) => sq,
+                    Err(_) => continue,
+                };
+                if self.get_piece(dest).is_some() || self.ep_square == Some(dest) {
+                    ret.push(Move {
+                        src,
+                        dest,
+                        move_type: MoveType::Normal,
+                    });
+                }
+            }
+
+            // single push
+            let nc = c as isize;
+            let dest = match Square::from_row_col_signed(nr, nc) {
+                Ok(sq) => sq,
+                Err(_) => continue,
+            };
+
+            if self.get_piece(dest).is_none() {
+                ret.push(Move {
+                    src,
+                    dest,
+                    move_type: MoveType::Normal,
+                });
+
+                // double push
+                if r == match self.turn {
+                    Color::White => 1,
+                    Color::Black => BOARD_HEIGHT - 2,
+                } {
+                    let nr = (r as isize)
+                        + match self.turn {
+                            Color::White => 2,
+                            Color::Black => -2,
+                        };
+                    let nc = c as isize;
+                    let dest = Square::from_row_col_signed(nr, nc)
+                        .expect("Pawn double push should have valid destination");
+                    if self.get_piece(dest).is_none() {
+                        ret.push(Move {
+                            src,
+                            dest,
+                            move_type: MoveType::Normal,
+                        })
+                    }
+                }
+            }
+        }
         ret
     }
 }
@@ -407,9 +469,9 @@ mod tests {
     use super::*;
     use crate::fen::{ToFen, START_POSITION};
 
-    /// Test that slider pieces can move and capture.
+    /// Test movegen through contrived positions.
     #[test]
-    fn test_slider_movegen() {
+    fn test_movegen() {
         let test_cases = [
             // rook test
             (
@@ -427,6 +489,32 @@ mod tests {
                     MoveType::Normal,
                 )],
             ),
+            // white pawn push/capture
+            (
+                "8/8/8/8/8/p1p5/1P6/8 w - - 0 1",
+                vec![("b2", vec!["a3", "c3", "b3", "b4"], MoveType::Normal)],
+            ),
+            // white pawn en passant
+            (
+                "8/8/4p3/3pP3/8/8/8/8 w - d6 0 1",
+                vec![("e5", vec!["d6"], MoveType::Normal)],
+            ),
+            // white pawn blocked
+            ("8/8/8/8/8/1p6/1P6/8 w - - 0 1", vec![]),
+            // white pawn blocked (partially)
+            ("8/8/8/8/1p6/8/1P6/8 w - - 0 1", vec![("b2", vec!["b3"], MoveType::Normal)]),
+            // black pawn push/capture
+            (
+                "8/1p6/P1P5/8/8/8/8/8 b - - 0 1",
+                vec![("b7", vec!["a6", "c6", "b6", "b5"], MoveType::Normal)],
+            ),
+            // black pawn en passant
+            (
+                "8/8/8/8/pP6/P7/8/8 b - b3 0 1",
+                vec![("a4", vec!["b3"], MoveType::Normal)],
+            ),
+            // black pawn blocked
+            ("8/1p6/1P6/8/8/8/8/8 b - - 0 1", vec![]),
             // king against the boundary
             (
                 "3K4/4p3/1q3p2/4p3/1p1r4/8/8/8 w - - 0 1",
