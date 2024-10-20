@@ -469,6 +469,30 @@ impl PseudoMoveGen for BoardState {
                 }
             }
         }
+        for src in squares!(Knight) {
+            let (r, c) = src.to_row_col();
+            let dirs = [
+                (2, 1),
+                (1, 2),
+                (-1, 2),
+                (-2, 1),
+                (-2, -1),
+                (-1, -2),
+                (1, -2),
+                (2, -1),
+            ];
+            for dir in dirs {
+                let nr = r as isize + dir.0;
+                let nc = c as isize + dir.1;
+                if let Ok(dest) = Square::from_row_col_signed(nr, nc) {
+                    ret.push(Move {
+                        src,
+                        dest,
+                        move_type: MoveType::Normal,
+                    })
+                }
+            }
+        }
         ret
     }
 }
@@ -500,6 +524,28 @@ mod tests {
                     vec![
                         "a2", "a3", "a4", "a5", "a6", "a7", "a8", "b1", "c1", "d1", "e1", "f1",
                         "g1", "h1",
+                    ],
+                    MoveType::Normal,
+                )],
+            ),
+            // horse test
+            (
+                "8/2r1r3/1n3q2/3N4/8/2p5/8/8 w - - 0 1",
+                vec![(
+                    "d5",
+                    vec![
+                        "f6", "e7", "c7", "b6", "b4", "c3", "e3", "f4",
+                    ],
+                    MoveType::Normal,
+                )],
+            ),
+            // horse (blocked by boundary)
+            (
+                "8/8/8/8/8/6n1/5n2/7N w - - 0 1",
+                vec![(
+                    "h1",
+                    vec![
+                        "f2", "g3"
                     ],
                     MoveType::Normal,
                 )],
