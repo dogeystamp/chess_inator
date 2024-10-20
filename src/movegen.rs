@@ -18,15 +18,14 @@ struct Node {
 impl Default for Node {
     fn default() -> Self {
         Node {
-            pos: BoardState::from_fen(START_POSITION.to_string())
-                .expect("Starting FEN should be valid"),
+            pos: BoardState::from_fen(START_POSITION).expect("Starting FEN should be valid"),
             prev: None,
         }
     }
 }
 
 /// Piece enum specifically for promotions.
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 enum PromotePiece {
     Rook,
     Bishop,
@@ -45,17 +44,18 @@ impl From<PromotePiece> for Piece {
     }
 }
 
-/// Pseudo-legal move.
-///
-/// No checking is done when constructing this.
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
 enum MoveType {
     /// Pawn promotes to another piece.
     Promotion(PromotePiece),
     /// Capture, or push move. Includes castling and en-passant too.
     Normal,
 }
-/// Move data common to all move types.
-struct Move {
+/// Pseudo-legal move.
+///
+/// No checking is done when constructing this.
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+pub struct Move {
     src: Square,
     dest: Square,
     move_type: MoveType,
@@ -232,7 +232,7 @@ pub trait ToUCIAlgebraic {
 }
 
 #[derive(Debug)]
-enum MoveAlgebraicError {
+pub enum MoveAlgebraicError {
     /// String is invalid length; refuse to parse
     InvalidLength(usize),
     /// Invalid character at given index.
@@ -250,14 +250,14 @@ impl FromUCIAlgebraic for Move {
             return Err(MoveAlgebraicError::InvalidLength(value_len));
         }
 
-        let src_sq = match Square::from_algebraic(&value[0..=1]) {
+        let src_sq = match value[0..=1].parse::<Square>() {
             Ok(sq) => sq,
             Err(e) => {
                 return Err(MoveAlgebraicError::SquareError(0, e));
             }
         };
 
-        let dest_sq = match Square::from_algebraic(&value[2..=3]) {
+        let dest_sq = match value[2..=3].parse::<Square>() {
             Ok(sq) => sq,
             Err(e) => {
                 return Err(MoveAlgebraicError::SquareError(0, e));
@@ -285,10 +285,143 @@ impl FromUCIAlgebraic for Move {
     }
 }
 
+/// Pseudo-legal move generation.
+///
+/// "Pseudo-legal" here means that moving into check is allowed, and capturing friendly pieces is
+/// allowed. These will be filtered out in the legal move generation step.
+pub trait PseudoMoveGen {
+    type MoveIterable;
+    fn gen_pseudo_moves(self) -> Self::MoveIterable;
+}
+
+enum SliderDirection {
+    /// Rook movement
+    Straight,
+    /// Bishop movement
+    Diagonal,
+    /// Queen/king movement
+    Star,
+}
+/// Generate slider moves for a given square.
+///
+/// # Arguments
+///
+/// * `board`: Board to generate moves with.
+/// * `src`: Square on which the slider piece is on.
+/// * `move_list`: Vector to append generated moves to.
+/// * `slide_type`: Directions the piece is allowed to go in.
+/// * `keep_going`: Allow sliding more than one square (true for everything except king).
+fn move_slider(
+    board: &BoardState,
+    src: Square,
+    move_list: &mut Vec<Move>,
+    slide_type: SliderDirection,
+    keep_going: bool,
+) {
+    let dirs_straight = [(0, 1), (1, 0), (-1, 0), (0, -1)];
+    let dirs_diag = [(1, 1), (1, -1), (-1, 1), (-1, -1)];
+    let dirs_star = [
+        (1, 1),
+        (1, -1),
+        (-1, 1),
+        (-1, -1),
+        (0, 1),
+        (1, 0),
+        (-1, 0),
+        (0, -1),
+    ];
+
+    let dirs = match slide_type {
+        SliderDirection::Straight => dirs_straight.iter(),
+        SliderDirection::Diagonal => dirs_diag.iter(),
+        SliderDirection::Star => dirs_star.iter(),
+    };
+
+    for dir in dirs {
+        let (mut r, mut c) = src.to_row_col();
+        loop {
+            // increment
+            let nr = r as isize + dir.0;
+            let nc = c as isize + dir.1;
+
+            if let Ok(dest) = Square::from_row_col_signed(nr, nc) {
+                r = nr as usize;
+                c = nc as usize;
+
+                move_list.push(Move {
+                    src,
+                    dest,
+                    move_type: MoveType::Normal,
+                });
+
+                // Stop at other pieces.
+                if let Some(_cap_pc) = board.get_piece(dest) {
+                    break;
+                }
+            } else {
+                break;
+            }
+
+            if !keep_going {
+                break;
+            }
+        }
+    }
+}
+
+impl PseudoMoveGen for BoardState {
+    type MoveIterable = Vec<Move>;
+
+    fn gen_pseudo_moves(self) -> Self::MoveIterable {
+        let mut ret = Vec::new();
+        for pl in self.players {
+            for sq in pl.board(Piece::Rook).into_iter() {
+                move_slider(&self, sq, &mut ret, SliderDirection::Straight, true);
+            }
+        }
+        ret
+    }
+}
+
+/// Legal move generation.
+pub trait LegalMoveGen {
+    type MoveIterable;
+    fn gen_moves(self) -> Self::MoveIterable;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::fen::{ToFen, START_POSITION};
+
+    /// Test that slider pieces can move and capture.
+    #[test]
+    fn test_slider_movegen() {
+        let test_cases = [(
+            // start position
+            "8/8/8/8/8/8/8/R7 w - - 0 1",
+            // expected moves
+            vec![(
+                // source piece
+                "a1",
+                // destination squares
+                vec![
+                    "a2", "a3", "a4", "a5", "a6", "a7", "a8", "b1", "c1", "d1", "e1", "f1", "g1",
+                    "h1",
+                ],
+            )],
+        )];
+
+        for (fen, expected) in test_cases {
+            let board = BoardState::from_fen(fen).unwrap();
+
+            let mut moves = board.gen_pseudo_moves();
+            moves.sort_unstable();
+            let moves = moves;
+
+            let expected_moves = expected.iter().map(|(src, dests)| {});
+        }
+    }
 
     /// Test that make move and unmake move work as expected.
     ///
@@ -405,7 +538,7 @@ mod tests {
             // make move
             eprintln!("Starting test case {i}, make move.");
             let mut node = Node {
-                pos: BoardState::from_fen(start_pos.to_string()).unwrap(),
+                pos: BoardState::from_fen(start_pos).unwrap(),
                 prev: None,
             };
             for (move_str, expect_fen) in moves {

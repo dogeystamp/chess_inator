@@ -1,5 +1,7 @@
 #![deny(rust_2018_idioms)]
 
+use std::str::FromStr;
+
 pub mod fen;
 pub mod movegen;
 
@@ -107,7 +109,7 @@ impl ColPiece {
 /// Square index newtype.
 ///
 /// A1 is (0, 0) -> 0, A2 is (0, 1) -> 2, and H8 is (7, 7) -> 63.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 struct Square(usize);
 
 #[derive(Debug)]
@@ -127,6 +129,28 @@ impl TryFrom<usize> for Square {
         }
     }
 }
+
+macro_rules! sq_try_from {
+    ($T: ty) => {
+        impl TryFrom<$T> for Square {
+            type Error = SquareError;
+
+            fn try_from(value: $T) -> Result<Self, Self::Error> {
+                if let Ok(upper_bound) = <$T>::try_from(N_SQUARES) {
+                    if (0..upper_bound).contains(&value) {
+                        return Ok(Square(value as usize));
+                    }
+                }
+                Err(SquareError::OutOfBounds)
+            }
+        }
+    };
+}
+
+sq_try_from!(i32);
+sq_try_from!(isize);
+sq_try_from!(i8);
+
 impl From<Square> for usize {
     fn from(value: Square) -> Self {
         value.0
@@ -136,6 +160,10 @@ impl Square {
     fn from_row_col(r: usize, c: usize) -> Result<Self, SquareError> {
         //! Get index of square based on row and column.
         let ret = BOARD_WIDTH * r + c;
+        ret.try_into()
+    }
+    fn from_row_col_signed(r: isize, c: isize) -> Result<Self, SquareError> {
+        let ret = (BOARD_WIDTH as isize) * r + c;
         ret.try_into()
     }
     fn to_row_col(self) -> (usize, usize) {
@@ -155,10 +183,14 @@ impl Square {
         let file = letters[col];
         format!("{file}{rank}")
     }
+}
+
+impl FromStr for Square {
+    type Err = SquareError;
 
     /// Convert typical human-readable form (e.g. `e4`) to square index.
-    fn from_algebraic(value: &str) -> Result<Self, SquareError> {
-        let bytes = value.as_bytes();
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let bytes = s.as_bytes();
         let col = match bytes[0] as char {
             'a' => 0,
             'b' => 1,
@@ -289,8 +321,13 @@ struct Player {
 }
 
 impl Player {
-    /// Get board for a specific piece.
-    fn board(&mut self, pc: Piece) -> &mut Bitboard {
+    /// Get board (non-mutable) for a specific piece.
+    fn board(&self, pc: Piece) -> &Bitboard {
+        &self.bit[pc as usize]
+    }
+
+    /// Get board (mutable) for a specific piece.
+    fn board_mut(&mut self, pc: Piece) -> &mut Bitboard {
         &mut self.bit[pc as usize]
     }
 }
@@ -371,7 +408,7 @@ impl BoardState {
     /// Create a new piece in a location.
     fn set_piece(&mut self, idx: Square, pc: ColPiece) {
         let pl = self.pl_mut(pc.col);
-        pl.board(pc.into()).on_idx(idx);
+        pl.board_mut(pc.into()).on_idx(idx);
         *self.mail.sq_mut(idx) = Some(pc);
     }
 
@@ -381,7 +418,7 @@ impl BoardState {
     fn del_piece(&mut self, idx: Square) -> Result<ColPiece, NoPieceError> {
         if let Some(pc) = *self.mail.sq_mut(idx) {
             let pl = self.pl_mut(pc.col);
-            pl.board(pc.into()).off_idx(idx);
+            pl.board_mut(pc.into()).off_idx(idx);
             *self.mail.sq_mut(idx) = None;
             Ok(pc)
         } else {
@@ -423,12 +460,45 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_square_casts() {
+        let fail_cases = [-1, 64, 0x7FFFFFFF, 257, 256, 128, 65, -3, !0x7FFFFFFF];
+        for tc in fail_cases {
+            macro_rules! try_type {
+                ($T: ty) => {
+                    if let Ok(conv) = <$T>::try_from(tc) {
+                        assert!(matches!(Square::try_from(conv), Err(SquareError::OutOfBounds)))
+                    }
+                };
+            }
+            try_type!(i32);
+            try_type!(i8);
+            try_type!(isize);
+            try_type!(usize);
+        }
+
+        let good_cases = 0..N_SQUARES;
+        for tc in good_cases {
+            macro_rules! try_type {
+                ($T: ty) => {
+                    let conv = <$T>::try_from(tc).unwrap();
+                    let res = Square::try_from(conv).unwrap();
+                    assert_eq!(res.0, tc);
+                };
+            }
+            try_type!(i32);
+            try_type!(i8);
+            try_type!(isize);
+            try_type!(usize);
+        }
+    }
+
+    #[test]
     fn test_to_from_algebraic() {
         let test_cases = [("a1", 0), ("a8", 56), ("h1", 7), ("h8", 63)];
         for (sqr, idx) in test_cases {
             assert_eq!(Square::try_from(idx).unwrap().to_algebraic(), sqr);
             assert_eq!(
-                Square::from_algebraic(sqr).unwrap(),
+                sqr.parse::<Square>().unwrap(),
                 Square::try_from(idx).unwrap()
             );
         }

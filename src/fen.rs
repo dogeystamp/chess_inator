@@ -4,7 +4,7 @@ pub const START_POSITION: &str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w 
 
 pub trait FromFen {
     type Error;
-    fn from_fen(_: String) -> Result<Self, Self::Error>
+    fn from_fen(_: &str) -> Result<Self, Self::Error>
     where
         Self: std::marker::Sized;
 }
@@ -36,7 +36,7 @@ pub enum FenError {
 
 impl FromFen for BoardState {
     type Error = FenError;
-    fn from_fen(fen: String) -> Result<BoardState, FenError> {
+    fn from_fen(fen: &str) -> Result<BoardState, FenError> {
         //! Parse FEN string into position.
 
         /// Parser state machine.
@@ -301,7 +301,7 @@ mod tests {
 
     macro_rules! make_board {
         ($fen_fmt: expr) => {
-            BoardState::from_fen(format!($fen_fmt)).unwrap()
+            BoardState::from_fen(&format!($fen_fmt)).unwrap()
         };
     }
 
@@ -437,7 +437,7 @@ mod tests {
 
         for fen1 in test_cases {
             println!("fen1: {fen1:?}");
-            let fen2 = BoardState::from_fen(fen1.to_string()).unwrap().to_fen();
+            let fen2 = BoardState::from_fen(fen1).unwrap().to_fen();
 
             assert_eq!(fen1.to_string(), fen2, "FEN not equivalent")
         } 
