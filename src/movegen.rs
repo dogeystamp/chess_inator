@@ -294,6 +294,28 @@ pub trait PseudoMoveGen {
     fn gen_pseudo_moves(self) -> Self::MoveIterable;
 }
 
+const DIRS_STRAIGHT: [(isize, isize); 4] = [(0, 1), (1, 0), (-1, 0), (0, -1)];
+const DIRS_DIAG: [(isize, isize); 4] = [(1, 1), (1, -1), (-1, 1), (-1, -1)];
+const DIRS_STAR: [(isize, isize); 8] = [
+    (1, 1),
+    (1, -1),
+    (-1, 1),
+    (-1, -1),
+    (0, 1),
+    (1, 0),
+    (-1, 0),
+    (0, -1),
+];
+const DIRS_KNIGHT: [(isize, isize); 8] = [
+    (2, 1),
+    (1, 2),
+    (-1, 2),
+    (-2, 1),
+    (-2, -1),
+    (-1, -2),
+    (1, -2),
+    (2, -1),
+];
 enum SliderDirection {
     /// Rook movement
     Straight,
@@ -318,23 +340,10 @@ fn move_slider(
     slide_type: SliderDirection,
     keep_going: bool,
 ) {
-    let dirs_straight = [(0, 1), (1, 0), (-1, 0), (0, -1)];
-    let dirs_diag = [(1, 1), (1, -1), (-1, 1), (-1, -1)];
-    let dirs_star = [
-        (1, 1),
-        (1, -1),
-        (-1, 1),
-        (-1, -1),
-        (0, 1),
-        (1, 0),
-        (-1, 0),
-        (0, -1),
-    ];
-
     let dirs = match slide_type {
-        SliderDirection::Straight => dirs_straight.iter(),
-        SliderDirection::Diagonal => dirs_diag.iter(),
-        SliderDirection::Star => dirs_star.iter(),
+        SliderDirection::Straight => DIRS_STRAIGHT.iter(),
+        SliderDirection::Diagonal => DIRS_DIAG.iter(),
+        SliderDirection::Star => DIRS_STAR.iter(),
     };
 
     for dir in dirs {
@@ -512,17 +521,8 @@ impl PseudoMoveGen for BoardState {
         }
         for src in squares!(Knight) {
             let (r, c) = src.to_row_col();
-            let dirs = [
-                (2, 1),
-                (1, 2),
-                (-1, 2),
-                (-2, 1),
-                (-2, -1),
-                (-1, -2),
-                (1, -2),
-                (2, -1),
-            ];
-            for dir in dirs {
+
+            for dir in DIRS_KNIGHT {
                 let nr = r as isize + dir.0;
                 let nc = c as isize + dir.1;
                 if let Ok(dest) = Square::from_row_col_signed(nr, nc) {
