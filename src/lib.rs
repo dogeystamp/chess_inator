@@ -53,7 +53,7 @@ const N_PIECES: usize = 6;
 struct PieceErr;
 
 /// Color and piece.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct ColPiece {
     pc: Piece,
     col: Color,
@@ -192,6 +192,14 @@ impl Square {
         let (r, c) = self.to_row_col();
         (r.try_into().unwrap(), c.try_into().unwrap())
     }
+
+    /// Vertically mirror a square.
+    fn mirror_vert(&self) -> Self {
+        let (r, c) = self.to_row_col();
+        let (nr, nc) = (BOARD_HEIGHT - 1 - r, c);
+        Square::from_row_col(nr, nc)
+            .unwrap_or_else(|e| panic!("mirrored square should be valid: nr {nr} nc {nc}: {e:?}"))
+    }
 }
 
 impl Display for Square {
@@ -259,7 +267,7 @@ impl From<Piece> for char {
     }
 }
 
-#[derive(Default, Debug, Clone, Copy)]
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
 struct Bitboard(u64);
 
 impl Bitboard {
@@ -310,7 +318,7 @@ impl Iterator for BitboardIterator {
 /// Array form board.
 ///
 /// Complements bitboards, notably for "what piece is at this square?" queries.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Mailbox([Option<ColPiece>; N_SQUARES]);
 
 impl Default for Mailbox {
@@ -334,7 +342,7 @@ impl Mailbox {
 /// Piece bitboards and state for one player.
 ///
 /// Default is all empty.
-#[derive(Default, Debug, Clone, Copy)]
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
 struct Player {
     /// Bitboards for individual pieces. Piece -> locations.
     bit: [Bitboard; N_PIECES],
@@ -389,7 +397,7 @@ impl ToString for CastleRights {
 /// Immutable game state, unique to a position.
 ///
 /// Default is empty.
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct BoardState {
     /// Player bitboards
     players: [Player; N_COLORS],
@@ -440,11 +448,26 @@ impl BoardState {
         &mut self.castle.0[col as usize]
     }
 
+    /// Get iterator over all squares.
+    fn squares() -> impl Iterator<Item = Square> {
+        (0..N_SQUARES).map(Square::try_from).map(|x| x.unwrap())
+    }
+
     /// Create a new piece in a location.
     fn set_piece(&mut self, idx: Square, pc: ColPiece) {
         let pl = self.pl_mut(pc.col);
         pl.board_mut(pc.into()).on_idx(idx);
         *self.mail.sq_mut(idx) = Some(pc);
+    }
+
+    /// Set the piece (or no piece) in a square.
+    fn set_square(&mut self, idx: Square, pc: Option<ColPiece>) {
+        match pc {
+            Some(pc) => self.set_piece(idx, pc),
+            None => {
+                let _ = self.del_piece(idx);
+            }
+        }
     }
 
     /// Delete the piece in a location, and return ("pop") that piece.
@@ -469,6 +492,32 @@ impl BoardState {
     /// Get the piece at a location.
     fn get_piece(&self, idx: Square) -> Option<ColPiece> {
         *self.mail.sq(idx)
+    }
+
+    /// Mirrors the position so that black and white are switched.
+    ///
+    /// Mainly to avoid duplication in tests.
+    fn flip_colors(&self) -> Self {
+        let mut new_board = Self {
+            turn: self.turn.flip(),
+            half_moves: self.half_moves,
+            full_moves: self.full_moves,
+            players: Default::default(),
+            mail: Default::default(),
+            ep_square: self.ep_square.map(|sq| sq.mirror_vert()),
+            castle: CastleRights (self.castle.0),
+        };
+
+        new_board.castle.0.reverse();
+
+        for sq in BoardState::squares() {
+            let opt_pc = self.get_piece(sq.mirror_vert()).map(|pc| ColPiece {
+                col: pc.col.flip(),
+                pc: pc.pc,
+            });
+            new_board.set_square(sq, opt_pc)
+        }
+        new_board
     }
 
     /// Maximum amount of moves in the counter to parse before giving up
@@ -569,5 +618,28 @@ mod tests {
             .into_iter()
             .collect::<Vec<Square>>();
         assert_eq!(white_queens, vec![Square::from_str("d6").unwrap()])
+    }
+
+    #[test]
+    fn test_square_mirror() {
+        for (sq, expect) in [("a1", "a8"), ("h1", "h8"), ("d4", "d5")] {
+            let sq = sq.parse::<Square>().unwrap();
+            let expect = expect.parse::<Square>().unwrap();
+            assert_eq!(sq.mirror_vert(), expect);
+        }
+    }
+
+    #[test]
+    fn test_flip_colors() {
+        let test_cases = [
+            ("2kqrbnp/8/8/8/8/8/8/2KQRBNP w - - 0 1", "2kqrbnp/8/8/8/8/8/8/2KQRBNP b - - 0 1"),
+            ("2kqrbnp/8/8/8/8/8/6N1/2KQRB1P w - a1 0 1", "2kqrb1p/6n1/8/8/8/8/8/2KQRBNP b - a8 0 1"),
+            ("r3k2r/8/8/8/8/8/8/R3K2R w Kq - 0 1", "r3k2r/8/8/8/8/8/8/R3K2R b Qk - 0 1"),
+        ];
+        for (tc, expect) in test_cases {
+            let tc = BoardState::from_fen(tc).unwrap();
+            let expect = BoardState::from_fen(expect).unwrap();
+            assert_eq!(tc.flip_colors(), expect);
+        }
     }
 }
