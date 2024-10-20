@@ -44,7 +44,7 @@ impl From<PromotePiece> for Piece {
     }
 }
 
-#[derive(PartialEq, Eq, PartialOrd, Ord)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Debug, Clone, Copy)]
 enum MoveType {
     /// Pawn promotes to another piece.
     Promotion(PromotePiece),
@@ -54,7 +54,7 @@ enum MoveType {
 /// Pseudo-legal move.
 ///
 /// No checking is done when constructing this.
-#[derive(PartialEq, Eq, PartialOrd, Ord)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Debug, Clone, Copy)]
 pub struct Move {
     src: Square,
     dest: Square,
@@ -397,20 +397,33 @@ mod tests {
     /// Test that slider pieces can move and capture.
     #[test]
     fn test_slider_movegen() {
-        let test_cases = [(
-            // start position
-            "8/8/8/8/8/8/8/R7 w - - 0 1",
-            // expected moves
-            vec![(
-                // source piece
-                "a1",
-                // destination squares
-                vec![
-                    "a2", "a3", "a4", "a5", "a6", "a7", "a8", "b1", "c1", "d1", "e1", "f1", "g1",
-                    "h1",
-                ],
-            )],
-        )];
+        let test_cases = [
+            (
+                // start position
+                "8/8/8/8/8/8/8/R7 w - - 0 1",
+                // expected moves
+                vec![(
+                    // source piece
+                    "a1",
+                    // destination squares
+                    vec![
+                        "a2", "a3", "a4", "a5", "a6", "a7", "a8", "b1", "c1", "d1", "e1", "f1",
+                        "g1", "h1",
+                    ],
+                    MoveType::Normal,
+                )],
+            ),
+            (
+                "8/1p6/8/1R2p3/1p6/8/8/8 w - - 0 1",
+                vec![(
+                    "b5",
+                    vec![
+                        "b6", "b7", "b4", "a5", "c5", "d5", "e5",
+                    ],
+                    MoveType::Normal,
+                )],
+            ),
+        ];
 
         for (fen, expected) in test_cases {
             let board = BoardState::from_fen(fen).unwrap();
@@ -419,7 +432,27 @@ mod tests {
             moves.sort_unstable();
             let moves = moves;
 
-            let expected_moves = expected.iter().map(|(src, dests)| {});
+            let mut expected_moves = expected
+                .iter()
+                .map(|(src, dests, move_type)| {
+                    let src = src.parse::<Square>().unwrap();
+                    let dests = dests
+                        .iter()
+                        .map(|x| x.parse::<Square>())
+                        .map(|x| x.unwrap());
+                    dests.map(move |dest| Move {
+                        src,
+                        dest,
+                        move_type: *move_type,
+                    })
+                })
+                .flatten()
+                .collect::<Vec<Move>>();
+
+            expected_moves.sort_unstable();
+            let expected_moves = expected_moves;
+
+            assert_eq!(moves, expected_moves);
         }
     }
 

@@ -1,7 +1,7 @@
 #![deny(rust_2018_idioms)]
 
-use std::str::FromStr;
 use std::fmt::Display;
+use std::str::FromStr;
 
 pub mod fen;
 pub mod movegen;
@@ -157,15 +157,25 @@ impl From<Square> for usize {
         value.0
     }
 }
+
+macro_rules! from_row_col_generic {
+    ($T: ty, $r: ident, $c: ident) => {
+        if !(0..(BOARD_HEIGHT as $T)).contains(&$r) || !(0..(BOARD_WIDTH as $T)).contains(&$c) {
+            Err(SquareError::OutOfBounds)
+        } else {
+            let ret = (BOARD_WIDTH as $T) * $r + $c;
+            ret.try_into()
+        }
+    };
+}
+
 impl Square {
     fn from_row_col(r: usize, c: usize) -> Result<Self, SquareError> {
         //! Get index of square based on row and column.
-        let ret = BOARD_WIDTH * r + c;
-        ret.try_into()
+        from_row_col_generic!(usize, r, c)
     }
     fn from_row_col_signed(r: isize, c: isize) -> Result<Self, SquareError> {
-        let ret = (BOARD_WIDTH as isize) * r + c;
-        ret.try_into()
+        from_row_col_generic!(isize, r, c)
     }
     fn to_row_col(self) -> (usize, usize) {
         //! Get row, column from index
@@ -469,7 +479,10 @@ mod tests {
             macro_rules! try_type {
                 ($T: ty) => {
                     if let Ok(conv) = <$T>::try_from(tc) {
-                        assert!(matches!(Square::try_from(conv), Err(SquareError::OutOfBounds)))
+                        assert!(matches!(
+                            Square::try_from(conv),
+                            Err(SquareError::OutOfBounds)
+                        ))
                     }
                 };
             }
