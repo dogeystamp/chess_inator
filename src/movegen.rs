@@ -395,11 +395,38 @@ impl PseudoMoveGen for BoardState {
         for src in squares!(Pawn) {
             let (r, c) = src.to_row_col();
 
+            let last_row = match self.turn {
+                Color::White => BOARD_HEIGHT as isize - 1,
+                Color::Black => 0,
+            };
+
             let nr = (r as isize)
                 + match self.turn {
                     Color::White => 1,
                     Color::Black => -1,
                 };
+            let is_promotion = nr == last_row;
+
+            macro_rules! push_moves {
+                ($src: ident, $dest: ident) => {
+                    if is_promotion {
+                        use PromotePiece::*;
+                        for prom_pc in [Queen, Knight, Rook, Bishop] {
+                            ret.push(Move {
+                                $src,
+                                $dest,
+                                move_type: MoveType::Promotion(prom_pc),
+                            });
+                        }
+                    } else {
+                        ret.push(Move {
+                            $src,
+                            $dest,
+                            move_type: MoveType::Normal,
+                        });
+                    }
+                };
+            }
 
             // capture
             for horiz in [-1, 1] {
@@ -409,11 +436,7 @@ impl PseudoMoveGen for BoardState {
                     Err(_) => continue,
                 };
                 if self.get_piece(dest).is_some() || self.ep_square == Some(dest) {
-                    ret.push(Move {
-                        src,
-                        dest,
-                        move_type: MoveType::Normal,
-                    });
+                    push_moves!(src, dest);
                 }
             }
 
@@ -425,11 +448,7 @@ impl PseudoMoveGen for BoardState {
             };
 
             if self.get_piece(dest).is_none() {
-                ret.push(Move {
-                    src,
-                    dest,
-                    move_type: MoveType::Normal,
-                });
+                push_moves!(src, dest);
 
                 // double push
                 if r == match self.turn {
@@ -445,11 +464,7 @@ impl PseudoMoveGen for BoardState {
                     let dest = Square::from_row_col_signed(nr, nc)
                         .expect("Pawn double push should have valid destination");
                     if self.get_piece(dest).is_none() {
-                        ret.push(Move {
-                            src,
-                            dest,
-                            move_type: MoveType::Normal,
-                        })
+                        push_moves!(src, dest);
                     }
                 }
             }
@@ -489,6 +504,42 @@ mod tests {
                     MoveType::Normal,
                 )],
             ),
+            // white pawn promotion
+            (
+                "q1q5/1P6/8/8/8/8/8/8 w - - 0 1",
+                vec![
+                    ("b7", vec!["b8"], MoveType::Promotion(PromotePiece::Rook)),
+                    ("b7", vec!["b8"], MoveType::Promotion(PromotePiece::Queen)),
+                    ("b7", vec!["b8"], MoveType::Promotion(PromotePiece::Bishop)),
+                    ("b7", vec!["b8"], MoveType::Promotion(PromotePiece::Knight)),
+                    ("b7", vec!["a8"], MoveType::Promotion(PromotePiece::Rook)),
+                    ("b7", vec!["a8"], MoveType::Promotion(PromotePiece::Queen)),
+                    ("b7", vec!["a8"], MoveType::Promotion(PromotePiece::Bishop)),
+                    ("b7", vec!["a8"], MoveType::Promotion(PromotePiece::Knight)),
+                    ("b7", vec!["c8"], MoveType::Promotion(PromotePiece::Rook)),
+                    ("b7", vec!["c8"], MoveType::Promotion(PromotePiece::Queen)),
+                    ("b7", vec!["c8"], MoveType::Promotion(PromotePiece::Bishop)),
+                    ("b7", vec!["c8"], MoveType::Promotion(PromotePiece::Knight)),
+                ],
+            ),
+            // black pawn promotion
+            (
+                "8/8/8/8/8/8/1p6/Q1Q5 b - - 0 1",
+                vec![
+                    ("b2", vec!["b1"], MoveType::Promotion(PromotePiece::Rook)),
+                    ("b2", vec!["b1"], MoveType::Promotion(PromotePiece::Queen)),
+                    ("b2", vec!["b1"], MoveType::Promotion(PromotePiece::Bishop)),
+                    ("b2", vec!["b1"], MoveType::Promotion(PromotePiece::Knight)),
+                    ("b2", vec!["a1"], MoveType::Promotion(PromotePiece::Rook)),
+                    ("b2", vec!["a1"], MoveType::Promotion(PromotePiece::Queen)),
+                    ("b2", vec!["a1"], MoveType::Promotion(PromotePiece::Bishop)),
+                    ("b2", vec!["a1"], MoveType::Promotion(PromotePiece::Knight)),
+                    ("b2", vec!["c1"], MoveType::Promotion(PromotePiece::Rook)),
+                    ("b2", vec!["c1"], MoveType::Promotion(PromotePiece::Queen)),
+                    ("b2", vec!["c1"], MoveType::Promotion(PromotePiece::Bishop)),
+                    ("b2", vec!["c1"], MoveType::Promotion(PromotePiece::Knight)),
+                ],
+            ),
             // white pawn push/capture
             (
                 "8/8/8/8/8/p1p5/1P6/8 w - - 0 1",
@@ -502,7 +553,10 @@ mod tests {
             // white pawn blocked
             ("8/8/8/8/8/1p6/1P6/8 w - - 0 1", vec![]),
             // white pawn blocked (partially)
-            ("8/8/8/8/1p6/8/1P6/8 w - - 0 1", vec![("b2", vec!["b3"], MoveType::Normal)]),
+            (
+                "8/8/8/8/1p6/8/1P6/8 w - - 0 1",
+                vec![("b2", vec!["b3"], MoveType::Normal)],
+            ),
             // black pawn push/capture
             (
                 "8/1p6/P1P5/8/8/8/8/8 b - - 0 1",
