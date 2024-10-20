@@ -1,6 +1,7 @@
 #![deny(rust_2018_idioms)]
 
 use std::str::FromStr;
+use std::fmt::Display;
 
 pub mod fen;
 pub mod movegen;
@@ -174,14 +175,16 @@ impl Square {
         assert!(rem <= 7);
         (div, rem)
     }
+}
 
+impl Display for Square {
     /// Convert square to typical human-readable form (e.g. `e4`).
-    fn to_algebraic(self) -> String {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let letters = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
         let (row, col) = self.to_row_col();
         let rank = (row + 1).to_string();
         let file = letters[col];
-        format!("{file}{rank}")
+        write!(f, "{}{}", file, rank)
     }
 }
 
@@ -496,7 +499,7 @@ mod tests {
     fn test_to_from_algebraic() {
         let test_cases = [("a1", 0), ("a8", 56), ("h1", 7), ("h8", 63)];
         for (sqr, idx) in test_cases {
-            assert_eq!(Square::try_from(idx).unwrap().to_algebraic(), sqr);
+            assert_eq!(Square::try_from(idx).unwrap().to_string(), sqr);
             assert_eq!(
                 sqr.parse::<Square>().unwrap(),
                 Square::try_from(idx).unwrap()

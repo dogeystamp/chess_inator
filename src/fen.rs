@@ -267,7 +267,7 @@ impl ToFen for BoardState {
         let turn = char::from(self.turn);
         let castle = self.castle.to_string();
         let ep_square = match self.ep_square {
-            Some(sqr) => sqr.to_algebraic(),
+            Some(sqr) => sqr.to_string(),
             None => "-".to_string(),
         };
         let half_move = self.half_moves.to_string();
