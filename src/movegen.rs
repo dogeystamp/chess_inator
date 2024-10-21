@@ -663,16 +663,16 @@ mod tests {
 
     /// Generate new test cases by flipping colors on existing ones.
     fn flip_test_case(board: BoardState, moves: &Vec<Move>) -> (BoardState, Vec<Move>) {
-        let mut move_vec = moves.iter().map(|mv| Move {
+        let mut move_vec = moves
+            .iter()
+            .map(|mv| Move {
                 src: mv.src.mirror_vert(),
                 dest: mv.dest.mirror_vert(),
                 move_type: mv.move_type,
-            }).collect::<Vec<Move>>();
+            })
+            .collect::<Vec<Move>>();
         move_vec.sort_unstable();
-        (
-            board.flip_colors(),
-            move_vec,
-        )
+        (board.flip_colors(), move_vec)
     }
 
     /// Test movegen through contrived positions.
@@ -914,7 +914,13 @@ mod tests {
             let anti_moves = anti_moves;
 
             assert_eq!(moves, expected_moves, "failed tc {}", board.to_fen());
-            assert_eq!(anti_moves, anti_expected_moves, "failed anti-tc '{}' (originally '{}')", anti_board.to_fen(), board.to_fen());
+            assert_eq!(
+                anti_moves,
+                anti_expected_moves,
+                "failed anti-tc '{}' (originally '{}')",
+                anti_board.to_fen(),
+                board.to_fen()
+            );
         }
     }
 

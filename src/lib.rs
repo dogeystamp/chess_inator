@@ -505,7 +505,7 @@ impl BoardState {
             players: Default::default(),
             mail: Default::default(),
             ep_square: self.ep_square.map(|sq| sq.mirror_vert()),
-            castle: CastleRights (self.castle.0),
+            castle: CastleRights(self.castle.0),
         };
 
         new_board.castle.0.reverse();
@@ -632,9 +632,18 @@ mod tests {
     #[test]
     fn test_flip_colors() {
         let test_cases = [
-            ("2kqrbnp/8/8/8/8/8/8/2KQRBNP w - - 0 1", "2kqrbnp/8/8/8/8/8/8/2KQRBNP b - - 0 1"),
-            ("2kqrbnp/8/8/8/8/8/6N1/2KQRB1P w - a1 0 1", "2kqrb1p/6n1/8/8/8/8/8/2KQRBNP b - a8 0 1"),
-            ("r3k2r/8/8/8/8/8/8/R3K2R w Kq - 0 1", "r3k2r/8/8/8/8/8/8/R3K2R b Qk - 0 1"),
+            (
+                "2kqrbnp/8/8/8/8/8/8/2KQRBNP w - - 0 1",
+                "2kqrbnp/8/8/8/8/8/8/2KQRBNP b - - 0 1",
+            ),
+            (
+                "2kqrbnp/8/8/8/8/8/6N1/2KQRB1P w - a1 0 1",
+                "2kqrb1p/6n1/8/8/8/8/8/2KQRBNP b - a8 0 1",
+            ),
+            (
+                "r3k2r/8/8/8/8/8/8/R3K2R w Kq - 0 1",
+                "r3k2r/8/8/8/8/8/8/R3K2R b Qk - 0 1",
+            ),
         ];
         for (tc, expect) in test_cases {
             let tc = BoardState::from_fen(tc).unwrap();
