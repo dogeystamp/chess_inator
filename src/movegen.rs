@@ -626,6 +626,48 @@ mod tests {
     use super::*;
     use crate::fen::{ToFen, START_POSITION};
 
+    /// Helper to produce test cases.
+    fn decondense_moves(
+        test_case: (&str, Vec<(&str, Vec<&str>, MoveType)>),
+    ) -> (BoardState, Vec<Move>) {
+        let (fen, expected) = test_case;
+        let board = BoardState::from_fen(fen).unwrap();
+
+        let mut expected_moves = expected
+            .iter()
+            .map(|(src, dests, move_type)| {
+                let src = src.parse::<Square>().unwrap();
+                let dests = dests
+                    .iter()
+                    .map(|x| x.parse::<Square>())
+                    .map(|x| x.unwrap());
+                dests.map(move |dest| Move {
+                    src,
+                    dest,
+                    move_type: *move_type,
+                })
+            })
+            .flatten()
+            .collect::<Vec<Move>>();
+
+        expected_moves.sort_unstable();
+        (board, expected_moves)
+    }
+
+    /// Generate new test cases by flipping colors on existing ones.
+    fn flip_test_case(board: BoardState, moves: &Vec<Move>) -> (BoardState, Vec<Move>) {
+        let mut move_vec = moves.iter().map(|mv| Move {
+                src: mv.src.mirror_vert(),
+                dest: mv.dest.mirror_vert(),
+                move_type: mv.move_type,
+            }).collect::<Vec<Move>>();
+        move_vec.sort_unstable();
+        (
+            board.flip_colors(),
+            move_vec,
+        )
+    }
+
     /// Test movegen through contrived positions.
     #[test]
     fn test_movegen() {
@@ -851,34 +893,21 @@ mod tests {
             ),
         ];
 
-        for (fen, expected) in test_cases {
-            let board = BoardState::from_fen(fen).unwrap();
+        for tc in test_cases {
+            let decondensed = decondense_moves(tc);
+            let (board, expected_moves) = decondensed;
+
+            let (anti_board, anti_expected_moves) = flip_test_case(board, &expected_moves);
 
             let mut moves: Vec<Move> = board.gen_pseudo_moves().into_iter().collect();
+            let mut anti_moves: Vec<Move> = anti_board.gen_pseudo_moves().into_iter().collect();
             moves.sort_unstable();
+            anti_moves.sort_unstable();
             let moves = moves;
+            let anti_moves = anti_moves;
 
-            let mut expected_moves = expected
-                .iter()
-                .map(|(src, dests, move_type)| {
-                    let src = src.parse::<Square>().unwrap();
-                    let dests = dests
-                        .iter()
-                        .map(|x| x.parse::<Square>())
-                        .map(|x| x.unwrap());
-                    dests.map(move |dest| Move {
-                        src,
-                        dest,
-                        move_type: *move_type,
-                    })
-                })
-                .flatten()
-                .collect::<Vec<Move>>();
-
-            expected_moves.sort_unstable();
-            let expected_moves = expected_moves;
-
-            assert_eq!(moves, expected_moves);
+            assert_eq!(moves, expected_moves, "failed tc {}", board.to_fen());
+            assert_eq!(anti_moves, anti_expected_moves, "failed anti-tc '{}' (originally '{}')", anti_board.to_fen(), board.to_fen());
         }
     }
 
@@ -916,6 +945,15 @@ mod tests {
                 *expected,
                 "failed on {}",
                 fen
+            );
+
+            let board_anti = board.flip_colors();
+            assert_eq!(
+                is_check(&board_anti, Color::Black),
+                *expected,
+                "failed on anti-version of {} ({})",
+                fen,
+                board_anti.to_fen()
             );
         }
     }
