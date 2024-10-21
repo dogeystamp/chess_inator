@@ -74,25 +74,20 @@ pub struct Move {
 }
 
 impl Move {
-    /// Make move and return new position.
+    /// Make move, without setting up the backlink for unmake.
     ///
-    /// Old position is saved in a backlink.
-    /// No checking is done to verify even pseudo-legality of the move.
-    pub fn make(self, old_node: Rc<Node>) -> Node {
-        let old_pos = old_node.pos;
-        let mut node = Node {
-            prev: Some(old_node),
-            pos: old_pos,
-        };
+    /// Call this directly when making new positions that are dead ends (won't be used further).
+    fn make_unlinked(self, old_pos: BoardState) -> BoardState {
+        let mut new_pos = old_pos;
 
         if old_pos.turn == Color::Black {
-            node.pos.full_moves += 1;
+            new_pos.full_moves += 1;
         }
 
         /// Get the piece at the source square.
         macro_rules! pc_src {
             ($data: ident) => {
-                node.pos
+                new_pos
                     .get_piece($data.src)
                     .expect("Move source should have a piece")
             };
@@ -100,7 +95,7 @@ impl Move {
         /// Perform sanity checks.
         macro_rules! pc_asserts {
             ($pc_src: ident, $data: ident) => {
-                debug_assert_eq!($pc_src.col, node.pos.turn, "Moving piece on wrong turn.");
+                debug_assert_eq!($pc_src.col, new_pos.turn, "Moving piece on wrong turn.");
                 debug_assert_ne!($data.src, $data.dest, "Moving piece to itself.");
             };
         }
@@ -111,8 +106,8 @@ impl Move {
                 pc_asserts!(pc_src, self);
                 debug_assert_eq!(pc_src.pc, Piece::Pawn);
 
-                let _ = node.pos.del_piece(self.src);
-                node.pos.set_piece(
+                let _ = new_pos.del_piece(self.src);
+                new_pos.set_piece(
                     self.dest,
                     ColPiece {
                         pc: Piece::from(to_piece),
@@ -124,14 +119,14 @@ impl Move {
                 let pc_src = pc_src!(self);
                 pc_asserts!(pc_src, self);
 
-                let pc_dest: Option<ColPiece> = node.pos.get_piece(self.dest);
+                let pc_dest: Option<ColPiece> = new_pos.get_piece(self.dest);
 
                 let (src_row, src_col) = self.src.to_row_col();
                 let (dest_row, dest_col) = self.dest.to_row_col();
 
                 if matches!(pc_src.pc, Piece::Pawn) {
                     // pawn moves are irreversible
-                    node.pos.half_moves = 0;
+                    new_pos.half_moves = 0;
 
                     // set en-passant target square
                     if src_row.abs_diff(dest_row) == 2 {
@@ -139,11 +134,11 @@ impl Move {
                             Color::White => self.src.0 + BOARD_WIDTH,
                             Color::Black => self.src.0 - BOARD_WIDTH,
                         };
-                        node.pos.ep_square = Some(
+                        new_pos.ep_square = Some(
                             Square::try_from(new_idx).expect("En-passant target should be valid."),
                         )
                     } else {
-                        node.pos.ep_square = None;
+                        new_pos.ep_square = None;
                         if pc_dest.is_none() && src_col != dest_col {
                             // we took en passant
                             debug_assert!(src_row.abs_diff(dest_row) == 1);
@@ -154,22 +149,22 @@ impl Move {
                                 Color::Black => self.dest.0 + BOARD_WIDTH,
                             })
                             .expect("En-passant capture square should be valid.");
-                            node.pos
+                            new_pos
                                 .del_piece(ep_capture)
                                 .expect("En-passant capture square should have piece.");
                         }
                     }
                 } else {
-                    node.pos.half_moves += 1;
-                    node.pos.ep_square = None;
+                    new_pos.half_moves += 1;
+                    new_pos.ep_square = None;
                 }
 
                 if pc_dest.is_some() {
                     // captures are irreversible
-                    node.pos.half_moves = 0;
+                    new_pos.half_moves = 0;
                 }
 
-                let castle = &mut node.pos.pl_castle_mut(pc_src.col);
+                let castle = &mut new_pos.pl_castle_mut(pc_src.col);
                 if matches!(pc_src.pc, Piece::King) {
                     // forfeit castling rights
                     castle.k = false;
@@ -193,7 +188,7 @@ impl Move {
                             .expect("rook castling src square should be valid");
                         let rook_dest = Square::from_row_col(rook_row, rook_dest_col)
                             .expect("rook castling dest square should be valid");
-                        node.pos.move_piece(rook_src, rook_dest);
+                        new_pos.move_piece(rook_src, rook_dest);
                     }
                     debug_assert!(
                         (0..=2).contains(&horiz_diff),
@@ -220,13 +215,25 @@ impl Move {
                     }
                 }
 
-                node.pos.move_piece(self.src, self.dest);
+                new_pos.move_piece(self.src, self.dest);
             }
         }
 
-        node.pos.turn = node.pos.turn.flip();
+        new_pos.turn = new_pos.turn.flip();
 
-        node
+        new_pos
+    }
+
+    /// Make move and return new position.
+    ///
+    /// Old position is saved in a backlink.
+    /// No checking is done to verify even pseudo-legality of the move.
+    pub fn make(self, old_node: Rc<Node>) -> Node {
+        let pos = self.make_unlinked(old_node.pos);
+        Node {
+            prev: Some(old_node),
+            pos,
+        }
     }
 }
 
@@ -616,8 +623,8 @@ impl LegalMoveGen for Node {
             })
             .filter(|mv| {
                 // disallow moving into check
-                let new_node = mv.make(self.clone().into());
-                !is_check(&new_node.pos, self.pos.turn)
+                let new_pos = mv.make_unlinked(self.pos);
+                !is_check(&new_pos, self.pos.turn)
             })
     }
 }
