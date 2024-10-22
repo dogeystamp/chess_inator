@@ -945,27 +945,17 @@ mod tests {
             ),
         ];
 
-        for tc in test_cases {
-            let decondensed = decondense_moves(tc);
-            let (board, expected_moves) = decondensed;
+        let test_cases = test_cases.map(decondense_moves);
 
-            let (anti_board, anti_expected_moves) = flip_test_case(board, &expected_moves);
+        let augmented_test_cases = test_cases.clone().map(|tc| flip_test_case(tc.0, &tc.1));
+        let all_cases = [augmented_test_cases, test_cases].concat();
 
+        for (board, expected_moves) in all_cases {
             let mut moves: Vec<Move> = board.gen_pseudo_moves().into_iter().collect();
-            let mut anti_moves: Vec<Move> = anti_board.gen_pseudo_moves().into_iter().collect();
             moves.sort_unstable();
-            anti_moves.sort_unstable();
             let moves = moves;
-            let anti_moves = anti_moves;
 
             assert_eq!(moves, expected_moves, "failed tc {}", board.to_fen());
-            assert_eq!(
-                anti_moves,
-                anti_expected_moves,
-                "failed anti-tc '{}' (originally '{}')",
-                anti_board.to_fen(),
-                board.to_fen()
-            );
         }
     }
 
@@ -1061,16 +1051,12 @@ mod tests {
             // castling while checked
             (
                 "8/8/8/8/8/8/rrrrr2r/4K2R w KQ - 0 1",
-                vec![
-                    ("e1", vec!["f1"], MoveType::Normal),
-                ],
+                vec![("e1", vec!["f1"], MoveType::Normal)],
             ),
             // castling while checked
             (
                 "8/8/8/8/8/8/r3rrrr/R3K3 w KQ - 0 1",
-                vec![
-                    ("e1", vec!["d1"], MoveType::Normal),
-                ],
+                vec![("e1", vec!["d1"], MoveType::Normal)],
             ),
             // castling through check
             (
@@ -1100,11 +1086,15 @@ mod tests {
             ),
         ];
 
-        for tc in test_cases {
-            eprintln!("on test {}", tc.0);
+        let test_cases = test_cases.map(|tc| decondense_moves(tc));
+        let augmented_test_cases = test_cases.clone().map(|tc| flip_test_case(tc.0, &tc.1));
 
-            let (board, mut expected_moves) = decondense_moves(tc);
+        let all_cases = [augmented_test_cases, test_cases].concat();
+
+        for (board, mut expected_moves) in all_cases {
+            eprintln!("on test '{}'", board.to_fen());
             expected_moves.sort_unstable();
+            let expected_moves = expected_moves;
 
             let node = Node {
                 pos: board,
@@ -1114,8 +1104,6 @@ mod tests {
             let mut moves: Vec<Move> = node.gen_moves().into_iter().collect();
             moves.sort_unstable();
             let moves = moves;
-
-            let expected_moves = expected_moves;
 
             assert_eq!(moves, expected_moves);
         }

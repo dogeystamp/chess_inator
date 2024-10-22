@@ -483,7 +483,9 @@ impl BoardState {
     }
 
     fn move_piece(&mut self, src: Square, dest: Square) {
-        let pc = self.del_piece(src).unwrap_or_else(|_| panic!("move ({src} -> {dest}) should have piece at source"));
+        let pc = self
+            .del_piece(src)
+            .unwrap_or_else(|_| panic!("move ({src} -> {dest}) should have piece at source"));
         self.set_piece(dest, pc);
     }
 
