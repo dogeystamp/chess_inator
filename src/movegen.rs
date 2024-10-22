@@ -610,14 +610,14 @@ pub trait LegalMoveGen {
 fn is_check(board: &BoardState, pl: Color) -> bool {
     for src in board.pl(pl).board(Piece::King).into_iter() {
         macro_rules! detect_checker {
-            ($dirs: ident, $pc: ident, $keep_going: expr) => {
+            ($dirs: ident, $pc: pat, $keep_going: expr) => {
                 for dir in $dirs.into_iter() {
                     let (mut r, mut c) = src.to_row_col_signed();
                     loop {
                         let (nr, nc) = (r + dir.0, c + dir.1);
                         if let Ok(sq) = Square::from_row_col_signed(nr, nc) {
                             if let Some(pc) = board.get_piece(sq) {
-                                if pc.pc == Piece::$pc && pc.col != pl {
+                                if matches!(pc.pc, $pc) && pc.col != pl {
                                     return true;
                                 } else {
                                     break;
@@ -639,9 +639,10 @@ fn is_check(board: &BoardState, pl: Color) -> bool {
         let dirs_white_pawn = [(-1, 1), (-1, -1)];
         let dirs_black_pawn = [(1, 1), (1, -1)];
 
-        detect_checker!(DIRS_STAR, Queen, true);
-        detect_checker!(DIRS_DIAG, Bishop, true);
-        detect_checker!(DIRS_STRAIGHT, Rook, true);
+        use Piece::*;
+
+        detect_checker!(DIRS_DIAG, Bishop | Queen, true);
+        detect_checker!(DIRS_STRAIGHT, Rook | Queen, true);
         detect_checker!(DIRS_STAR, King, false);
         detect_checker!(DIRS_KNIGHT, Knight, false);
         match pl {
