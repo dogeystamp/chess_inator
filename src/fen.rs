@@ -109,15 +109,15 @@ impl FromFen for BoardState {
                         pc_char @ ('a'..='z' | 'A'..='Z') => {
                             let pc = ColPiece::try_from(pc_char).or(bad_char!(i, c))?;
 
+                            if col > 7 {
+                                return Err(FenError::TooManyPieces(i));
+                            };
                             pos.set_piece(
                                 Square::from_row_col(real_row, col)
                                     .or(Err(FenError::InternalError(i)))?,
                                 pc,
                             );
                             col += 1;
-                            if col > 8 {
-                                return Err(FenError::TooManyPieces(i));
-                            };
                             parser_state = FenState::Piece(row, col)
                         }
                         number @ '1'..='9' => {

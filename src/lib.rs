@@ -6,8 +6,6 @@ use std::str::FromStr;
 pub mod fen;
 pub mod movegen;
 
-use fen::FromFen;
-
 const BOARD_WIDTH: usize = 8;
 const BOARD_HEIGHT: usize = 8;
 const N_SQUARES: usize = BOARD_WIDTH * BOARD_HEIGHT;
@@ -485,7 +483,7 @@ impl BoardState {
     }
 
     fn move_piece(&mut self, src: Square, dest: Square) {
-        let pc = self.del_piece(src).expect("Move source should have piece.");
+        let pc = self.del_piece(src).unwrap_or_else(|_| panic!("move ({src} -> {dest}) should have piece at source"));
         self.set_piece(dest, pc);
     }
 
@@ -542,6 +540,8 @@ impl core::fmt::Display for BoardState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use fen::FromFen;
 
     #[test]
     fn test_square_casts() {
