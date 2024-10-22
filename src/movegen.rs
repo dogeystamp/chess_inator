@@ -83,8 +83,8 @@ impl Move {
     /// Make move, without setting up the backlink for unmake.
     ///
     /// Call this directly when making new positions that are dead ends (won't be used further).
-    fn make_unlinked(self, old_pos: BoardState) -> BoardState {
-        let mut new_pos = old_pos;
+    fn make_unlinked(self, old_pos: &BoardState) -> BoardState {
+        let mut new_pos = *old_pos;
 
         // reset en passant
         new_pos.ep_square = None;
@@ -245,7 +245,7 @@ impl Move {
     /// Old position is saved in a backlink.
     /// No checking is done to verify even pseudo-legality of the move.
     pub fn make(self, old_node: &Rc<Node>) -> Rc<Node> {
-        let pos = self.make_unlinked(old_node.pos);
+        let pos = self.make_unlinked(&old_node.pos);
         Node {
             prev: Some(Rc::clone(old_node)),
             pos,
@@ -671,7 +671,7 @@ impl LegalMoveGen for Node {
             })
             .filter(|mv| {
                 // disallow moving into check
-                let new_pos = mv.make_unlinked(self.pos);
+                let new_pos = mv.make_unlinked(&self.pos);
                 !is_check(&new_pos, self.pos.turn)
             })
     }
@@ -704,8 +704,7 @@ mod tests {
     fn test_bitboard_capture() {
         let board = BoardState::from_fen("8/8/8/8/8/8/r7/R7 w - - 0 1").unwrap();
         let mv = Move::from_uci_algebraic("a1a2").unwrap();
-        // there's an assertion within make move that should
-        let new_pos = mv.make_unlinked(board);
+        let new_pos = mv.make_unlinked(&board);
 
         use std::collections::hash_set::HashSet;
         use Piece::*;
@@ -1354,14 +1353,14 @@ mod tests {
                 3,
             ),
         ];
-        for (fen, expected_values, debug_limit_depth) in test_cases {
+        for (fen, expected_values, _debug_limit_depth) in test_cases {
             let root_node = Rc::new(Node::new(BoardState::from_fen(fen).unwrap()));
 
             for (depth, expected) in expected_values.iter().enumerate() {
                 eprintln!("running perft depth {depth} on position '{fen}'");
                 #[cfg(debug_assertions)]
                 {
-                    if depth > debug_limit_depth {
+                    if depth > _debug_limit_depth {
                         break;
                     }
                 }
