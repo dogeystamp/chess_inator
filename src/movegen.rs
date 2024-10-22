@@ -1,6 +1,6 @@
 //! Move generation.
 
-use crate::fen::{FromFen, START_POSITION};
+use crate::fen::{FromFen, ToFen, START_POSITION};
 use crate::{
     BoardState, ColPiece, Color, Piece, Square, SquareError, BOARD_HEIGHT, BOARD_WIDTH, N_SQUARES,
 };
@@ -30,9 +30,11 @@ impl Node {
     /// Intended usage is to always keep an Rc to the current node, and overwrite it with the
     /// result of unmake.
     pub fn unmake(&self) -> Rc<Node> {
-        self.prev
-            .clone()
-            .expect("unmake should not be called on root node")
+        if let Some(prev) = &self.prev {
+            Rc::clone(prev)
+        } else {
+            panic!("unmake should not be called on root node");
+        }
     }
 }
 
@@ -94,16 +96,23 @@ impl Move {
         }
         /// Perform sanity checks.
         macro_rules! pc_asserts {
-            ($pc_src: ident, $data: ident) => {
-                debug_assert_eq!($pc_src.col, new_pos.turn, "Moving piece on wrong turn.");
-                debug_assert_ne!($data.src, $data.dest, "Moving piece to itself.");
+            ($pc_src: ident) => {
+                debug_assert_eq!(
+                    $pc_src.col,
+                    new_pos.turn,
+                    "Moving piece on wrong turn. Move {} -> {} on board '{}'",
+                    self.src,
+                    self.dest,
+                    old_pos.to_fen()
+                );
+                debug_assert_ne!(self.src, self.dest, "Moving piece to itself.");
             };
         }
 
         match self.move_type {
             MoveType::Promotion(to_piece) => {
                 let pc_src = pc_src!(self);
-                pc_asserts!(pc_src, self);
+                pc_asserts!(pc_src);
                 debug_assert_eq!(pc_src.pc, Piece::Pawn);
 
                 let _ = new_pos.del_piece(self.src);
@@ -117,7 +126,7 @@ impl Move {
             }
             MoveType::Normal => {
                 let pc_src = pc_src!(self);
-                pc_asserts!(pc_src, self);
+                pc_asserts!(pc_src);
 
                 let pc_dest: Option<ColPiece> = new_pos.get_piece(self.dest);
 
@@ -229,12 +238,13 @@ impl Move {
     ///
     /// Old position is saved in a backlink.
     /// No checking is done to verify even pseudo-legality of the move.
-    pub fn make(self, old_node: Rc<Node>) -> Node {
+    pub fn make(self, old_node: &Rc<Node>) -> Rc<Node> {
         let pos = self.make_unlinked(old_node.pos);
         Node {
-            prev: Some(old_node),
+            prev: Some(Rc::clone(old_node)),
             pos,
         }
+        .into()
     }
 }
 
@@ -407,6 +417,7 @@ impl PseudoMoveGen for BoardState {
                 pl.board(Piece::$pc).into_iter()
             };
         }
+
         for sq in squares!(Rook) {
             move_slider(self, sq, &mut ret, SliderDirection::Straight, true);
         }
@@ -658,10 +669,50 @@ impl LegalMoveGen for Node {
             })
     }
 }
+
+/// How many nodes at depth N can be reached from this position.
+fn perft(depth: usize, node: &Rc<Node>) -> usize {
+    if depth == 0 {
+        return 1;
+    };
+
+    let mut ans = 0;
+
+    let moves = node.gen_moves();
+    for mv in moves {
+        let new_node = mv.make(node);
+        ans += perft(depth - 1, &new_node);
+    }
+
+    ans
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::fen::{ToFen, START_POSITION};
+
+    #[test]
+    /// Ensure that bitboard properly reflects captures.
+    fn test_bitboard_capture() {
+        let board = BoardState::from_fen("8/8/8/8/8/8/r7/R7 w - - 0 1").unwrap();
+        let mv = Move::from_uci_algebraic("a1a2").unwrap();
+        // there's an assertion within make move that should
+        let new_pos = mv.make_unlinked(board);
+
+        use std::collections::hash_set::HashSet;
+        use Piece::*;
+        for pc in [Rook, Bishop, Knight, Queen, King, Pawn] {
+            let white: HashSet<_> = new_pos.pl(Color::White).board(pc).into_iter().collect();
+            let black: HashSet<_> = new_pos.pl(Color::Black).board(pc).into_iter().collect();
+            let intersect = white.intersection(&black).collect::<Vec<_>>();
+            assert!(
+                intersect.is_empty(),
+                "Bitboard in illegal state: {pc:?} collides at {}",
+                intersect[0]
+            );
+        }
+    }
 
     /// Helper to produce test cases.
     fn decondense_moves(
@@ -1032,6 +1083,21 @@ mod tests {
                     ),
                 ],
             ),
+            (
+                "rnbqkbnr/p1pppppp/8/1P6/8/8/1PPPPPPP/RNBQKBNR b KQkq - 0 2",
+                vec![
+                    ("a7", vec!["a6", "a5"], MoveType::Normal),
+                    ("c7", vec!["c6", "c5"], MoveType::Normal),
+                    ("d7", vec!["d6", "d5"], MoveType::Normal),
+                    ("e7", vec!["e6", "e5"], MoveType::Normal),
+                    ("f7", vec!["f6", "f5"], MoveType::Normal),
+                    ("g7", vec!["g6", "g5"], MoveType::Normal),
+                    ("h7", vec!["h6", "h5"], MoveType::Normal),
+                    ("g8", vec!["h6", "f6"], MoveType::Normal),
+                    ("b8", vec!["c6", "a6"], MoveType::Normal),
+                    ("c8", vec!["b7", "a6"], MoveType::Normal),
+                ],
+            ),
             // castling through check
             (
                 "8/8/8/8/8/8/6rr/4K2R w KQ - 0 1",
@@ -1230,7 +1296,7 @@ mod tests {
             for (move_str, expect_fen) in moves {
                 let mv = Move::from_uci_algebraic(move_str).unwrap();
                 eprintln!("Moving {move_str}.");
-                node = mv.make(node).into();
+                node = mv.make(&node);
                 assert_eq!(node.pos.to_fen(), expect_fen.to_string())
             }
 
@@ -1242,6 +1308,51 @@ mod tests {
                 if *expect_fen != *start_pos {
                     node = node.unmake();
                 }
+            }
+        }
+    }
+
+    /// The standard movegen test.
+    ///
+    /// See https://www.chessprogramming.org/Perft
+    #[test]
+    fn test_perft() {
+        // https://www.chessprogramming.org/Perft_Results
+        let test_cases = [
+            (
+                START_POSITION,
+                // Only up to depth 4 because the engine isn't good enough to do this often
+                vec![1, 20, 400, 8_902, 197_281],
+            ),
+            (
+                "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
+                vec![1, 48, 2_039, 97862],
+            ),
+            (
+                "8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1",
+                vec![1, 14, 191, 2_812, 43_238],
+            ),
+            (
+                "r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq - 0 1",
+                vec![1, 6, 264, 9467],
+            ),
+            (
+                "rnbq1k1r/pp1Pbppp/2p5/8/2B5/8/PPP1NnPP/RNBQK2R w KQ - 1 8",
+                vec![1, 44, 1_486, 62_379],
+            ),
+            (
+                "r4rk1/1pp1qppp/p1np1n2/2b1p1B1/2B1P1b1/P1NP1N2/1PP1QPPP/R4RK1 w - - 0 10",
+                vec![1, 46, 2_079, 89_890],
+            ),
+        ];
+        for (fen, expected_values) in test_cases {
+            let root_node = Rc::new(Node {
+                pos: BoardState::from_fen(fen).unwrap(),
+                prev: None,
+            });
+
+            for (depth, expected) in expected_values.iter().enumerate() {
+                assert_eq!(perft(depth, &root_node), *expected, "failed perft depth {depth} on position '{fen}'");
             }
         }
     }

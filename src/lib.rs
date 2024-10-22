@@ -110,7 +110,7 @@ impl ColPiece {
 /// Square index newtype.
 ///
 /// A1 is (0, 0) -> 0, A2 is (0, 1) -> 2, and H8 is (7, 7) -> 63.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 struct Square(usize);
 
 #[derive(Debug)]
@@ -269,14 +269,19 @@ impl From<Piece> for char {
 struct Bitboard(u64);
 
 impl Bitboard {
-    pub fn on_idx(&mut self, idx: Square) {
-        //! Set the square at an index to on.
+    pub fn on_sq(&mut self, idx: Square) {
+        //! Set a square on.
         self.0 |= 1 << usize::from(idx);
     }
 
-    pub fn off_idx(&mut self, idx: Square) {
-        //! Set the square at an index to off.
+    pub fn off_sq(&mut self, idx: Square) {
+        //! Set a square off.
         self.0 &= !(1 << usize::from(idx));
+    }
+
+    pub fn get_sq(&self, idx: Square) -> bool {
+        //! Read the value at a square.
+        (self.0 & 1 << usize::from(idx)) == 1
     }
 
     pub fn is_empty(&self) -> bool {
@@ -307,7 +312,7 @@ impl Iterator for BitboardIterator {
         } else {
             let next_idx = self.remaining.0.trailing_zeros() as usize;
             let sq = Square(next_idx);
-            self.remaining.off_idx(sq);
+            self.remaining.off_sq(sq);
             Some(sq)
         }
     }
@@ -453,8 +458,9 @@ impl BoardState {
 
     /// Create a new piece in a location.
     fn set_piece(&mut self, idx: Square, pc: ColPiece) {
+        let _ = self.del_piece(idx);
         let pl = self.pl_mut(pc.col);
-        pl.board_mut(pc.into()).on_idx(idx);
+        pl.board_mut(pc.into()).on_sq(idx);
         *self.mail.sq_mut(idx) = Some(pc);
     }
 
@@ -474,7 +480,7 @@ impl BoardState {
     fn del_piece(&mut self, idx: Square) -> Result<ColPiece, NoPieceError> {
         if let Some(pc) = *self.mail.sq_mut(idx) {
             let pl = self.pl_mut(pc.col);
-            pl.board_mut(pc.into()).off_idx(idx);
+            pl.board_mut(pc.into()).off_sq(idx);
             *self.mail.sq_mut(idx) = None;
             Ok(pc)
         } else {
@@ -604,7 +610,7 @@ mod tests {
 
         let squares = indices.map(Square);
         for sq in squares {
-            bitboard.on_idx(sq);
+            bitboard.on_sq(sq);
         }
         // ensure that iteration does not consume the board
         for _ in 0..=1 {
