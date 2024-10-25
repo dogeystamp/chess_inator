@@ -6,6 +6,8 @@ use std::str::FromStr;
 pub mod fen;
 pub mod movegen;
 
+use crate::fen::{FromFen, START_POSITION};
+
 const BOARD_WIDTH: usize = 8;
 const BOARD_HEIGHT: usize = 8;
 const N_SQUARES: usize = BOARD_WIDTH * BOARD_HEIGHT;
@@ -401,7 +403,7 @@ impl ToString for CastleRights {
 ///
 /// Default is empty.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub struct BoardState {
+pub struct Board {
     /// Player bitboards
     players: [Player; N_COLORS],
 
@@ -426,11 +428,12 @@ pub struct BoardState {
     turn: Color,
 }
 
-/// Piece missing where there should be one.
-#[derive(Debug)]
-struct NoPieceError;
+impl Board {
+    /// Default chess position.
+    pub fn starting_pos() -> Self {
+        Board::from_fen(START_POSITION).unwrap()
+    }
 
-impl BoardState {
     /// Get mutable reference to a player.
     fn pl_mut(&mut self, col: Color) -> &mut Player {
         &mut self.players[col as usize]
@@ -456,42 +459,41 @@ impl BoardState {
         (0..N_SQUARES).map(Square::try_from).map(|x| x.unwrap())
     }
 
-    /// Create a new piece in a location.
-    fn set_piece(&mut self, idx: Square, pc: ColPiece) {
-        let _ = self.del_piece(idx);
+    /// Create a new piece in a location, and pop any existing piece in the destination.
+    fn set_piece(&mut self, idx: Square, pc: ColPiece) -> Option<ColPiece> {
+        let dest_pc = self.del_piece(idx);
         let pl = self.pl_mut(pc.col);
         pl.board_mut(pc.into()).on_sq(idx);
         *self.mail.sq_mut(idx) = Some(pc);
+        dest_pc
     }
 
-    /// Set the piece (or no piece) in a square.
-    fn set_square(&mut self, idx: Square, pc: Option<ColPiece>) {
+    /// Set the piece (or no piece) in a square, and return ("pop") the existing piece.
+    fn set_square(&mut self, idx: Square, pc: Option<ColPiece>) -> Option<ColPiece> {
         match pc {
-            Some(pc) => self.set_piece(idx, pc),
+            Some(pc) => {self.set_piece(idx, pc)},
             None => {
-                let _ = self.del_piece(idx);
+                self.del_piece(idx)
             }
         }
     }
 
     /// Delete the piece in a location, and return ("pop") that piece.
-    ///
-    /// Returns an error if there is no piece in the location.
-    fn del_piece(&mut self, idx: Square) -> Result<ColPiece, NoPieceError> {
+    fn del_piece(&mut self, idx: Square) -> Option<ColPiece> {
         if let Some(pc) = *self.mail.sq_mut(idx) {
             let pl = self.pl_mut(pc.col);
             pl.board_mut(pc.into()).off_sq(idx);
             *self.mail.sq_mut(idx) = None;
-            Ok(pc)
+            Some(pc)
         } else {
-            Err(NoPieceError)
+            None
         }
     }
 
     fn move_piece(&mut self, src: Square, dest: Square) {
         let pc = self
             .del_piece(src)
-            .unwrap_or_else(|_| panic!("move ({src} -> {dest}) should have piece at source"));
+            .unwrap_or_else(|| panic!("move ({src} -> {dest}) should have piece at source"));
         self.set_piece(dest, pc);
     }
 
@@ -516,12 +518,12 @@ impl BoardState {
 
         new_board.castle.0.reverse();
 
-        for sq in BoardState::squares() {
+        for sq in Board::squares() {
             let opt_pc = self.get_piece(sq.mirror_vert()).map(|pc| ColPiece {
                 col: pc.col.flip(),
                 pc: pc.pc,
             });
-            new_board.set_square(sq, opt_pc)
+            new_board.set_square(sq, opt_pc);
         }
         new_board
     }
@@ -530,7 +532,7 @@ impl BoardState {
     const MAX_MOVES: usize = 9_999;
 }
 
-impl core::fmt::Display for BoardState {
+impl core::fmt::Display for Board {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut str = String::with_capacity(N_SQUARES + BOARD_HEIGHT);
         for row in (0..BOARD_HEIGHT).rev() {
@@ -619,7 +621,7 @@ mod tests {
             }
         }
 
-        let board = BoardState::from_fen("8/4p3/1q1Q1p2/4p3/1p1r4/8/8/8 w - - 0 1").unwrap();
+        let board = Board::from_fen("8/4p3/1q1Q1p2/4p3/1p1r4/8/8/8 w - - 0 1").unwrap();
         let white_queens = board
             .pl(Color::White)
             .board(Piece::Queen)
@@ -654,8 +656,8 @@ mod tests {
             ),
         ];
         for (tc, expect) in test_cases {
-            let tc = BoardState::from_fen(tc).unwrap();
-            let expect = BoardState::from_fen(expect).unwrap();
+            let tc = Board::from_fen(tc).unwrap();
+            let expect = Board::from_fen(expect).unwrap();
             assert_eq!(tc.flip_colors(), expect);
         }
     }

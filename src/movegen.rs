@@ -2,45 +2,10 @@
 
 use crate::fen::{FromFen, ToFen, START_POSITION};
 use crate::{
-    BoardState, ColPiece, Color, Piece, Square, SquareError, BOARD_HEIGHT, BOARD_WIDTH, N_SQUARES,
+    Board, CastleRights, ColPiece, Color, Piece, Square, SquareError, BOARD_HEIGHT,
+    BOARD_WIDTH, N_SQUARES,
 };
 use std::rc::Rc;
-
-/// Game tree node.
-#[derive(Clone, Debug)]
-pub struct Node {
-    /// Immutable position data.
-    pos: BoardState,
-    /// Backlink to previous node.
-    prev: Option<Rc<Node>>,
-}
-
-impl Default for Node {
-    fn default() -> Self {
-        Node::new(BoardState::from_fen(START_POSITION).expect("Starting FEN should be valid"))
-    }
-}
-
-impl Node {
-    /// Undo move.
-    ///
-    /// Intended usage is to always keep an Rc to the current node, and overwrite it with the
-    /// result of unmake.
-    pub fn unmake(&self) -> Rc<Node> {
-        if let Some(prev) = &self.prev {
-            Rc::clone(prev)
-        } else {
-            panic!("unmake should not be called on root node");
-        }
-    }
-
-    pub fn new(board: BoardState) -> Self {
-        Node {
-            pos: board,
-            prev: None,
-        }
-    }
-}
 
 /// Piece enum specifically for promotions.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -58,6 +23,91 @@ impl From<PromotePiece> for Piece {
             PromotePiece::Bishop => Piece::Bishop,
             PromotePiece::Knight => Piece::Knight,
             PromotePiece::Queen => Piece::Queen,
+        }
+    }
+}
+
+enum AntiMoveType {
+    Normal,
+    /// En passant.
+    EnPassant {
+        cap: Square,
+    },
+    /// Pawn promotion.
+    Promotion,
+    /// King-rook castle. The king is the one considered to move.
+    Castle {
+        rook_src: Square,
+        rook_dest: Square,
+    },
+}
+
+/// Information used to reverse (unmake) a move.
+pub struct AntiMove {
+    dest: Square,
+    src: Square,
+    /// Captured piece, always assumed to be of enemy color.
+    cap: Option<Piece>,
+    move_type: AntiMoveType,
+    /// Half-move counter prior to this move
+    half_moves: usize,
+    /// Castling rights prior to this move.
+    castle: CastleRights,
+    /// En passant target square prior to this move.
+    ep_square: Option<Square>
+}
+
+impl AntiMove {
+    /// Undo the move.
+    fn unmake(self, pos: &mut Board) {
+        pos.move_piece(self.dest, self.src);
+        pos.half_moves = self.half_moves;
+        pos.castle = self.castle;
+        pos.ep_square = self.ep_square;
+
+        /// Restore captured piece at a given square.
+        macro_rules! cap_sq {
+            ($sq: expr) => {
+                if let Some(cap_pc) = self.cap {
+                    pos.set_piece(
+                        $sq,
+                        ColPiece {
+                            pc: cap_pc,
+                            col: pos.turn.flip(),
+                        },
+                    );
+                }
+            };
+        }
+
+        pos.turn = pos.turn.flip();
+        if pos.turn == Color::Black {
+            pos.full_moves -= 1;
+        }
+
+        match self.move_type {
+            AntiMoveType::Normal => {
+                cap_sq!(self.dest)
+            }
+            AntiMoveType::EnPassant { cap } => {
+                cap_sq!(cap);
+            }
+            AntiMoveType::Promotion => {
+                cap_sq!(self.dest);
+                pos.set_piece(
+                    self.src,
+                    ColPiece {
+                        pc: Piece::Pawn,
+                        col: pos.turn,
+                    },
+                );
+            }
+            AntiMoveType::Castle {
+                rook_src,
+                rook_dest,
+            } => {
+                pos.move_piece(rook_dest, rook_src);
+            }
         }
     }
 }
@@ -80,24 +130,30 @@ pub struct Move {
 }
 
 impl Move {
-    /// Make move, without setting up the backlink for unmake.
-    ///
-    /// Call this directly when making new positions that are dead ends (won't be used further).
-    fn make_unlinked(self, old_pos: &BoardState) -> BoardState {
-        let mut new_pos = *old_pos;
+    /// Apply move to a position.
+    fn make(self, pos: &mut Board) -> AntiMove {
+        let mut anti_move = AntiMove {
+            dest: self.dest,
+            src: self.src,
+            cap: None,
+            move_type: AntiMoveType::Normal,
+            half_moves: pos.half_moves,
+            castle: pos.castle,
+            ep_square: pos.ep_square,
+        };
 
         // reset en passant
-        new_pos.ep_square = None;
+        let ep_square = pos.ep_square;
+        pos.ep_square = None;
 
-        if old_pos.turn == Color::Black {
-            new_pos.full_moves += 1;
+        if pos.turn == Color::Black {
+            pos.full_moves += 1;
         }
 
         /// Get the piece at the source square.
         macro_rules! pc_src {
             ($data: ident) => {
-                new_pos
-                    .get_piece($data.src)
+                pos.get_piece($data.src)
                     .expect("Move source should have a piece")
             };
         }
@@ -106,11 +162,11 @@ impl Move {
             ($pc_src: ident) => {
                 debug_assert_eq!(
                     $pc_src.col,
-                    new_pos.turn,
+                    pos.turn,
                     "Moving piece on wrong turn. Move {} -> {} on board '{}'",
                     self.src,
                     self.dest,
-                    old_pos.to_fen()
+                    pos.to_fen()
                 );
                 debug_assert_ne!(self.src, self.dest, "Moving piece to itself.");
             };
@@ -122,27 +178,32 @@ impl Move {
                 pc_asserts!(pc_src);
                 debug_assert_eq!(pc_src.pc, Piece::Pawn);
 
-                let _ = new_pos.del_piece(self.src);
-                new_pos.set_piece(
+                pos.half_moves = 0;
+
+                anti_move.move_type = AntiMoveType::Promotion;
+
+                pos.del_piece(self.src);
+                pos.set_piece(
                     self.dest,
                     ColPiece {
                         pc: Piece::from(to_piece),
                         col: pc_src.col,
                     },
-                )
+                );
             }
             MoveType::Normal => {
                 let pc_src = pc_src!(self);
                 pc_asserts!(pc_src);
 
-                let pc_dest: Option<ColPiece> = new_pos.get_piece(self.dest);
+                let pc_dest: Option<ColPiece> = pos.get_piece(self.dest);
+                anti_move.cap = pc_dest.map(|pc| pc.pc);
 
                 let (src_row, src_col) = self.src.to_row_col_signed();
                 let (dest_row, dest_col) = self.dest.to_row_col_signed();
 
                 if matches!(pc_src.pc, Piece::Pawn) {
                     // pawn moves are irreversible
-                    new_pos.half_moves = 0;
+                    pos.half_moves = 0;
 
                     // set en-passant target square
                     if src_row.abs_diff(dest_row) == 2 {
@@ -155,31 +216,46 @@ impl Move {
                             };
                         let ep_targ = Square::from_row_col_signed(ep_row, ep_col)
                             .expect("En-passant target should be valid.");
-                        new_pos.ep_square = Some(ep_targ)
+                        pos.ep_square = Some(ep_targ)
                     } else if pc_dest.is_none() && src_col != dest_col {
                         // we took en passant
                         debug_assert!(src_row.abs_diff(dest_row) == 1);
-                        debug_assert_eq!(self.dest, old_pos.ep_square.unwrap());
+                        assert_eq!(self.dest, ep_square.expect("ep target should exist if taking ep"));
                         // square to actually capture at
                         let ep_capture = Square::try_from(match pc_src.col {
                             Color::White => self.dest.0 - BOARD_WIDTH,
                             Color::Black => self.dest.0 + BOARD_WIDTH,
                         })
                         .expect("En-passant capture square should be valid");
-                        new_pos.del_piece(ep_capture).unwrap_or_else(|_| {
-                            panic!("En-passant capture square should have piece. Position '{}', move {:?}", old_pos.to_fen(), self)
-                        });
+
+                        anti_move.move_type = AntiMoveType::EnPassant{cap: ep_capture};
+                        if let Some(pc_cap) = pos.del_piece(ep_capture) {
+                            debug_assert_eq!(
+                                pc_cap.col,
+                                pos.turn.flip(),
+                                "attempt to en passant wrong color, pos '{}', move {:?}",
+                                pos.to_fen(),
+                                self
+                            );
+                            anti_move.cap = Some(pc_cap.pc);
+                        } else {
+                            panic!(
+                                "En-passant capture square should have piece. Position '{}', move {:?}",
+                                pos.to_fen(),
+                                self
+                            );
+                        }
                     }
                 } else {
-                    new_pos.half_moves += 1;
+                    pos.half_moves += 1;
                 }
 
                 if pc_dest.is_some() {
                     // captures are irreversible
-                    new_pos.half_moves = 0;
+                    pos.half_moves = 0;
                 }
 
-                let castle = &mut new_pos.pl_castle_mut(pc_src.col);
+                let castle = &mut pos.pl_castle_mut(pc_src.col);
                 if matches!(pc_src.pc, Piece::King) {
                     // forfeit castling rights
                     castle.k = false;
@@ -203,8 +279,12 @@ impl Move {
                             .expect("rook castling src square should be valid");
                         let rook_dest = Square::from_row_col_signed(rook_row, rook_dest_col)
                             .expect("rook castling dest square should be valid");
-                        debug_assert!(new_pos.get_piece(rook_src).is_some(), "rook castling src square has no rook (move: {rook_src} -> {rook_dest})");
-                        new_pos.move_piece(rook_src, rook_dest);
+                        debug_assert!(pos.get_piece(rook_src).is_some(), "rook castling src square has no rook (move: {rook_src} -> {rook_dest})");
+                        anti_move.move_type = AntiMoveType::Castle {
+                            rook_src,
+                            rook_dest,
+                        };
+                        pos.move_piece(rook_src, rook_dest);
                     }
                     debug_assert!(
                         (0..=2).contains(&horiz_diff),
@@ -231,26 +311,13 @@ impl Move {
                     }
                 }
 
-                new_pos.move_piece(self.src, self.dest);
+                pos.move_piece(self.src, self.dest);
             }
-        }
+        };
 
-        new_pos.turn = new_pos.turn.flip();
+        pos.turn = pos.turn.flip();
 
-        new_pos
-    }
-
-    /// Make move and return new position.
-    ///
-    /// Old position is saved in a backlink.
-    /// No checking is done to verify even pseudo-legality of the move.
-    pub fn make(self, old_node: &Rc<Node>) -> Rc<Node> {
-        let pos = self.make_unlinked(&old_node.pos);
-        Node {
-            prev: Some(Rc::clone(old_node)),
-            pos,
-        }
-        .into()
+        anti_move
     }
 }
 
@@ -370,7 +437,7 @@ enum SliderDirection {
 /// * `slide_type`: Directions the piece is allowed to go in.
 /// * `keep_going`: Allow sliding more than one square (true for everything except king).
 fn move_slider(
-    board: &BoardState,
+    board: &Board,
     src: Square,
     move_list: &mut Vec<Move>,
     slide_type: SliderDirection,
@@ -414,7 +481,7 @@ fn move_slider(
     }
 }
 
-impl PseudoMoveGen for BoardState {
+impl PseudoMoveGen for Board {
     fn gen_pseudo_moves(&self) -> impl IntoIterator<Item = Move> {
         let mut ret = Vec::new();
         let pl = self.pl(self.turn);
@@ -607,7 +674,7 @@ pub trait LegalMoveGen {
 }
 
 /// Is a given player in check?
-fn is_check(board: &BoardState, pl: Color) -> bool {
+fn is_check(board: &Board, pl: Color) -> bool {
     for src in board.pl(pl).board(Piece::King).into_iter() {
         macro_rules! detect_checker {
             ($dirs: ident, $pc: pat, $keep_going: expr) => {
@@ -653,42 +720,47 @@ fn is_check(board: &BoardState, pl: Color) -> bool {
     false
 }
 
-impl LegalMoveGen for Node {
+impl LegalMoveGen for Board {
+    // mut required for check checking
     fn gen_moves(&self) -> impl IntoIterator<Item = Move> {
-        self.pos
-            .gen_pseudo_moves()
+        let mut pos = self.clone();
+
+        pos.gen_pseudo_moves()
             .into_iter()
             .filter(|mv| {
                 // disallow friendly fire
                 let src_pc = self
-                    .pos
                     .get_piece(mv.src)
                     .expect("move source should have piece");
-                if let Some(dest_pc) = self.pos.get_piece(mv.dest) {
+                if let Some(dest_pc) = self.get_piece(mv.dest) {
                     return dest_pc.col != src_pc.col;
                 }
                 true
             })
-            .filter(|mv| {
+            .filter(move |mv| {
                 // disallow moving into check
-                let new_pos = mv.make_unlinked(&self.pos);
-                !is_check(&new_pos, self.pos.turn)
+                let anti_move = mv.make(&mut pos);
+                let ret = !is_check(&pos, self.turn);
+                anti_move.unmake(&mut pos);
+                ret
             })
+            .collect::<Vec<_>>()
     }
 }
 
 /// How many nodes at depth N can be reached from this position.
-pub fn perft(depth: usize, node: &Rc<Node>) -> usize {
+pub fn perft(depth: usize, pos: &mut Board) -> usize {
     if depth == 0 {
         return 1;
     };
 
     let mut ans = 0;
 
-    let moves = node.gen_moves();
+    let moves: Vec<Move> = pos.gen_moves().into_iter().collect();
     for mv in moves {
-        let new_node = mv.make(node);
-        ans += perft(depth - 1, &new_node);
+        let anti_move = mv.make(pos);
+        ans += perft(depth - 1, pos);
+        anti_move.unmake(pos);
     }
 
     ans
@@ -702,15 +774,15 @@ mod tests {
     #[test]
     /// Ensure that bitboard properly reflects captures.
     fn test_bitboard_capture() {
-        let board = BoardState::from_fen("8/8/8/8/8/8/r7/R7 w - - 0 1").unwrap();
+        let mut pos = Board::from_fen("8/8/8/8/8/8/r7/R7 w - - 0 1").unwrap();
         let mv = Move::from_uci_algebraic("a1a2").unwrap();
-        let new_pos = mv.make_unlinked(&board);
+        let anti_move = mv.make(&mut pos);
 
         use std::collections::hash_set::HashSet;
         use Piece::*;
         for pc in [Rook, Bishop, Knight, Queen, King, Pawn] {
-            let white: HashSet<_> = new_pos.pl(Color::White).board(pc).into_iter().collect();
-            let black: HashSet<_> = new_pos.pl(Color::Black).board(pc).into_iter().collect();
+            let white: HashSet<_> = pos.pl(Color::White).board(pc).into_iter().collect();
+            let black: HashSet<_> = pos.pl(Color::Black).board(pc).into_iter().collect();
             let intersect = white.intersection(&black).collect::<Vec<_>>();
             assert!(
                 intersect.is_empty(),
@@ -723,9 +795,9 @@ mod tests {
     /// Helper to produce test cases.
     fn decondense_moves(
         test_case: (&str, Vec<(&str, Vec<&str>, MoveType)>),
-    ) -> (BoardState, Vec<Move>) {
+    ) -> (Board, Vec<Move>) {
         let (fen, expected) = test_case;
-        let board = BoardState::from_fen(fen).unwrap();
+        let board = Board::from_fen(fen).unwrap();
 
         let mut expected_moves = expected
             .iter()
@@ -749,7 +821,7 @@ mod tests {
     }
 
     /// Generate new test cases by flipping colors on existing ones.
-    fn flip_test_case(board: BoardState, moves: &Vec<Move>) -> (BoardState, Vec<Move>) {
+    fn flip_test_case(board: Board, moves: &Vec<Move>) -> (Board, Vec<Move>) {
         let mut move_vec = moves
             .iter()
             .map(|mv| Move {
@@ -1044,7 +1116,7 @@ mod tests {
 
         let all_cases = check_cases.iter().chain(&not_check_cases);
         for (fen, expected) in all_cases {
-            let board = BoardState::from_fen(fen).unwrap();
+            let board = Board::from_fen(fen).unwrap();
             assert_eq!(
                 is_check(&board, Color::White),
                 *expected,
@@ -1163,14 +1235,12 @@ mod tests {
 
         let all_cases = [augmented_test_cases, test_cases].concat();
 
-        for (board, mut expected_moves) in all_cases {
+        for (mut board, mut expected_moves) in all_cases {
             eprintln!("on test '{}'", board.to_fen());
             expected_moves.sort_unstable();
             let expected_moves = expected_moves;
 
-            let node = Node::new(board);
-
-            let mut moves: Vec<Move> = node.gen_moves().into_iter().collect();
+            let mut moves: Vec<Move> = board.gen_moves().into_iter().collect();
             moves.sort_unstable();
             let moves = moves;
 
@@ -1290,24 +1360,19 @@ mod tests {
         for (i, test_case) in test_cases.iter().enumerate() {
             let (start_pos, moves) = test_case;
 
-            // make move
             eprintln!("Starting test case {i}, make move.");
-            let mut node = Rc::new(Node::new(BoardState::from_fen(start_pos).unwrap()));
+            let mut pos = Board::from_fen(start_pos).unwrap();
             for (move_str, expect_fen) in moves {
+                let prior_fen = pos.to_fen();
                 let mv = Move::from_uci_algebraic(move_str).unwrap();
-                eprintln!("Moving {move_str}.");
-                node = mv.make(&node);
-                assert_eq!(node.pos.to_fen(), expect_fen.to_string())
-            }
-
-            // unmake move
-            eprintln!("Starting test case {i}, unmake move.");
-            for (_, expect_fen) in moves.iter().rev().chain([("", *start_pos)].iter()) {
-                eprintln!("{}", expect_fen);
-                assert_eq!(*node.pos.to_fen(), expect_fen.to_string());
-                if *expect_fen != *start_pos {
-                    node = node.unmake();
-                }
+                eprintln!("Moving {move_str} on {}", prior_fen);
+                let anti_move = mv.make(&mut pos);
+                eprintln!("Unmaking {move_str} on {}.", pos.to_fen());
+                anti_move.unmake(&mut pos);
+                assert_eq!(pos.to_fen(), prior_fen.to_string());
+                eprintln!("Remaking {move_str}.");
+                let anti_move = mv.make(&mut pos);
+                assert_eq!(pos.to_fen(), expect_fen.to_string());
             }
         }
     }
@@ -1354,7 +1419,7 @@ mod tests {
             ),
         ];
         for (fen, expected_values, _debug_limit_depth) in test_cases {
-            let root_node = Rc::new(Node::new(BoardState::from_fen(fen).unwrap()));
+            let mut pos = Board::from_fen(fen).unwrap();
 
             for (depth, expected) in expected_values.iter().enumerate() {
                 eprintln!("running perft depth {depth} on position '{fen}'");
@@ -1364,7 +1429,7 @@ mod tests {
                         break;
                     }
                 }
-                assert_eq!(perft(depth, &root_node), *expected,);
+                assert_eq!(perft(depth, &mut pos), *expected,);
             }
         }
     }

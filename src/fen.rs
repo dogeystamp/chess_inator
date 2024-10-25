@@ -1,4 +1,4 @@
-use crate::{BoardState, CastleRights, ColPiece, Color, Square, BOARD_HEIGHT, BOARD_WIDTH};
+use crate::{Board, CastleRights, ColPiece, Color, Square, BOARD_HEIGHT, BOARD_WIDTH};
 
 pub const START_POSITION: &str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 
@@ -34,9 +34,9 @@ pub enum FenError {
     InternalError(usize),
 }
 
-impl FromFen for BoardState {
+impl FromFen for Board {
     type Error = FenError;
-    fn from_fen(fen: &str) -> Result<BoardState, FenError> {
+    fn from_fen(fen: &str) -> Result<Board, FenError> {
         //! Parse FEN string into position.
 
         /// Parser state machine.
@@ -60,7 +60,7 @@ impl FromFen for BoardState {
             FullMove,
         }
 
-        let mut pos = BoardState::default();
+        let mut pos = Board::default();
 
         let mut parser_state = FenState::Piece(0, 0);
         let mut next_state = FenState::Space;
@@ -198,7 +198,7 @@ impl FromFen for BoardState {
                 }
                 FenState::HalfMove => {
                     if let Some(digit) = c.to_digit(10) {
-                        if pos.half_moves > BoardState::MAX_MOVES {
+                        if pos.half_moves > Board::MAX_MOVES {
                             return Err(FenError::TooManyMoves);
                         }
                         pos.half_moves *= 10;
@@ -211,7 +211,7 @@ impl FromFen for BoardState {
                 }
                 FenState::FullMove => {
                     if let Some(digit) = c.to_digit(10) {
-                        if pos.half_moves > BoardState::MAX_MOVES {
+                        if pos.half_moves > Board::MAX_MOVES {
                             return Err(FenError::TooManyMoves);
                         }
                         pos.full_moves *= 10;
@@ -233,7 +233,7 @@ impl FromFen for BoardState {
     }
 }
 
-impl ToFen for BoardState {
+impl ToFen for Board {
     fn to_fen(&self) -> String {
         let pieces_str = (0..BOARD_HEIGHT)
             .rev()
@@ -286,7 +286,7 @@ mod tests {
     #[test]
     fn test_fen_pieces() {
         let fen = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1";
-        let board = BoardState::from_fen(fen.into()).unwrap();
+        let board = Board::from_fen(fen.into()).unwrap();
         assert_eq!(
             (0..N_SQUARES)
                 .map(Square)
@@ -388,7 +388,7 @@ mod tests {
 
     #[test]
     fn test_fen_half_move_counter() {
-        for i in 0..=BoardState::MAX_MOVES {
+        for i in 0..=Board::MAX_MOVES {
             let board = make_board!("8/8/8/8/8/8/8/8 w - - {i} 0");
             assert_eq!(board.half_moves, i);
             assert_eq!(board.full_moves, 0);
@@ -397,7 +397,7 @@ mod tests {
 
     #[test]
     fn test_fen_move_counter() {
-        for i in 0..=BoardState::MAX_MOVES {
+        for i in 0..=Board::MAX_MOVES {
             let board = make_board!("8/8/8/8/8/8/8/8 w - - 0 {i}");
             assert_eq!(board.half_moves, 0);
             assert_eq!(board.full_moves, i);
@@ -437,7 +437,7 @@ mod tests {
 
         for fen1 in test_cases {
             println!("fen1: {fen1:?}");
-            let fen2 = BoardState::from_fen(fen1).unwrap().to_fen();
+            let fen2 = Board::from_fen(fen1).unwrap().to_fen();
 
             assert_eq!(fen1.to_string(), fen2, "FEN not equivalent")
         }
