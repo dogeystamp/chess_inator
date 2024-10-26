@@ -6,11 +6,10 @@ use chess_inator::movegen::LegalMoveGen;
 use std::env;
 
 fn main() {
-    for arg in env::args().skip(2) {
-        let board = Board::from_fen(&arg).unwrap();
-        let mvs = board.gen_moves();
-        for mv in mvs.into_iter() {
-            println!("{mv:?}")
-        }
+    let fen = env::args().nth(1).unwrap();
+    let board = Board::from_fen(&fen).unwrap();
+    let mvs = board.gen_moves();
+    for mv in mvs.into_iter() {
+        println!("{mv:?}")
     }
 }
