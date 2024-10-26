@@ -168,7 +168,7 @@ pub struct Move {
 
 impl Move {
     /// Apply move to a position.
-    fn make(self, pos: &mut Board) -> AntiMove {
+    pub fn make(self, pos: &mut Board) -> AntiMove {
         let mut anti_move = AntiMove {
             dest: self.dest,
             src: self.src,
