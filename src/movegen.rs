@@ -96,7 +96,7 @@ pub struct AntiMove {
 
 impl AntiMove {
     /// Undo the move.
-    fn unmake(self, pos: &mut Board) {
+    pub fn unmake(self, pos: &mut Board) {
         pos.move_piece(self.dest, self.src);
         pos.half_moves = self.half_moves;
         pos.castle = self.castle;

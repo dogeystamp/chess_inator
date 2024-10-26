@@ -15,6 +15,7 @@ Copyright © 2024 dogeystamp <dogeystamp@disroot.org>
 
 use chess_inator::fen::FromFen;
 use chess_inator::movegen::{FromUCIAlgebraic, Move, MoveGen, MoveGenType, ToUCIAlgebraic};
+use chess_inator::search::best_move;
 use chess_inator::Board;
 use std::io;
 
@@ -87,8 +88,7 @@ fn cmd_position(mut tokens: std::str::SplitWhitespace<'_>) -> Board {
 
 /// Play the game.
 fn cmd_go(mut _tokens: std::str::SplitWhitespace<'_>, board: &mut Board) {
-    let mvs: Vec<_> = board.gen_moves(MoveGenType::Legal).into_iter().collect();
-    let chosen = mvs.first();
+    let chosen = best_move(board);
     match chosen {
         Some(mv) => println!("bestmove {}", mv.to_uci_algebraic()),
         None => println!("bestmove 0000"),

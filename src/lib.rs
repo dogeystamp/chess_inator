@@ -19,6 +19,7 @@ use std::str::FromStr;
 pub mod eval;
 pub mod fen;
 pub mod movegen;
+pub mod search;
 
 use crate::fen::{FromFen, ToFen, START_POSITION};
 

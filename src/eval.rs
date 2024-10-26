@@ -18,7 +18,7 @@ use crate::{Board, Color, N_PIECES};
 /// Signed centipawn type.
 ///
 /// Positive is good for White, negative good for Black.
-type EvalInt = i16;
+pub type EvalInt = i16;
 
 pub trait Eval {
     /// Evaluate a position and assign it a score.
