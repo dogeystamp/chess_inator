@@ -1,4 +1,4 @@
-use crate::{Board, CastleRights, ColPiece, Color, Square, BOARD_HEIGHT, BOARD_WIDTH};
+use crate::{Board, ColPiece, Color, Square, BOARD_HEIGHT, BOARD_WIDTH};
 
 pub const START_POSITION: &str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 
@@ -280,8 +280,7 @@ impl ToFen for Board {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::CastlePlayer;
-    use crate::N_SQUARES;
+    use crate::{CastlePlayer, CastleRights, N_SQUARES};
 
     #[test]
     fn test_fen_pieces() {

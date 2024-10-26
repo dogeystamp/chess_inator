@@ -7,14 +7,13 @@ pub mod fen;
 pub mod movegen;
 
 use crate::fen::{FromFen, ToFen, START_POSITION};
-use crate::movegen::Move;
 
 const BOARD_WIDTH: usize = 8;
 const BOARD_HEIGHT: usize = 8;
 const N_SQUARES: usize = BOARD_WIDTH * BOARD_HEIGHT;
 
 #[derive(Debug, Copy, Clone, Default, PartialEq, Eq)]
-enum Color {
+pub enum Color {
     #[default]
     White = 0,
     Black = 1,
@@ -51,11 +50,11 @@ enum Piece {
 }
 const N_PIECES: usize = 6;
 
-struct PieceErr;
+pub struct PieceErr;
 
 /// Color and piece.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct ColPiece {
+pub struct ColPiece {
     pc: Piece,
     col: Color,
 }
@@ -114,7 +113,7 @@ impl ColPiece {
 ///
 /// A1 is (0, 0) -> 0, A2 is (0, 1) -> 2, and H8 is (7, 7) -> 63.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-struct Square(usize);
+pub struct Square(usize);
 
 #[derive(Debug)]
 pub enum SquareError {
@@ -269,7 +268,7 @@ impl From<Piece> for char {
 }
 
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
-struct Bitboard(u64);
+pub struct Bitboard(u64);
 
 impl Bitboard {
     pub fn on_sq(&mut self, idx: Square) {
@@ -302,7 +301,7 @@ impl IntoIterator for Bitboard {
     }
 }
 
-struct BitboardIterator {
+pub struct BitboardIterator {
     remaining: Bitboard,
 }
 
@@ -446,7 +445,7 @@ impl Board {
     }
 
     /// Get immutable reference to castling rights.
-    fn pl_castle(&self, col: Color) -> &CastlePlayer {
+    pub fn pl_castle(&self, col: Color) -> &CastlePlayer {
         &self.castle.0[col as usize]
     }
 
@@ -456,12 +455,12 @@ impl Board {
     }
 
     /// Get iterator over all squares.
-    fn squares() -> impl Iterator<Item = Square> {
+    pub fn squares() -> impl Iterator<Item = Square> {
         (0..N_SQUARES).map(Square::try_from).map(|x| x.unwrap())
     }
 
     /// Create a new piece in a location, and pop any existing piece in the destination.
-    fn set_piece(&mut self, idx: Square, pc: ColPiece) -> Option<ColPiece> {
+    pub fn set_piece(&mut self, idx: Square, pc: ColPiece) -> Option<ColPiece> {
         let dest_pc = self.del_piece(idx);
         let pl = self.pl_mut(pc.col);
         pl.board_mut(pc.into()).on_sq(idx);
@@ -470,7 +469,7 @@ impl Board {
     }
 
     /// Set the piece (or no piece) in a square, and return ("pop") the existing piece.
-    fn set_square(&mut self, idx: Square, pc: Option<ColPiece>) -> Option<ColPiece> {
+    pub fn set_square(&mut self, idx: Square, pc: Option<ColPiece>) -> Option<ColPiece> {
         match pc {
             Some(pc) => self.set_piece(idx, pc),
             None => self.del_piece(idx),
@@ -478,7 +477,7 @@ impl Board {
     }
 
     /// Delete the piece in a location, and return ("pop") that piece.
-    fn del_piece(&mut self, idx: Square) -> Option<ColPiece> {
+    pub fn del_piece(&mut self, idx: Square) -> Option<ColPiece> {
         if let Some(pc) = *self.mail.sq_mut(idx) {
             let pl = self.pl_mut(pc.col);
             pl.board_mut(pc.into()).off_sq(idx);
@@ -500,14 +499,14 @@ impl Board {
     }
 
     /// Get the piece at a location.
-    fn get_piece(&self, idx: Square) -> Option<ColPiece> {
+    pub fn get_piece(&self, idx: Square) -> Option<ColPiece> {
         *self.mail.sq(idx)
     }
 
     /// Mirrors the position so that black and white are switched.
     ///
     /// Mainly to avoid duplication in tests.
-    fn flip_colors(&self) -> Self {
+    pub fn flip_colors(&self) -> Self {
         let mut new_board = Self {
             turn: self.turn.flip(),
             half_moves: self.half_moves,
@@ -531,7 +530,7 @@ impl Board {
     }
 
     /// Is a given player in check?
-    fn is_check(&self, pl: Color) -> bool {
+    pub fn is_check(&self, pl: Color) -> bool {
         for src in self.pl(pl).board(Piece::King).into_iter() {
             macro_rules! detect_checker {
                 ($dirs: ident, $pc: pat, $keep_going: expr) => {

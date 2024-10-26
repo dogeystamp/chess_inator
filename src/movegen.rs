@@ -1,6 +1,6 @@
 //! Move generation.
 
-use crate::fen::{FromFen, ToFen, START_POSITION};
+use crate::fen::ToFen;
 use crate::{
     Board, CastleRights, ColPiece, Color, Piece, Square, SquareError, BOARD_HEIGHT, BOARD_WIDTH,
     N_SQUARES,
@@ -722,14 +722,14 @@ pub fn perft(depth: usize, pos: &mut Board) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fen::{ToFen, START_POSITION};
+    use crate::fen::{ToFen, START_POSITION, FromFen};
 
     #[test]
     /// Ensure that bitboard properly reflects captures.
     fn test_bitboard_capture() {
         let mut pos = Board::from_fen("8/8/8/8/8/8/r7/R7 w - - 0 1").unwrap();
         let mv = Move::from_uci_algebraic("a1a2").unwrap();
-        let anti_move = mv.make(&mut pos);
+        let _anti_move = mv.make(&mut pos);
 
         use std::collections::hash_set::HashSet;
         use Piece::*;
