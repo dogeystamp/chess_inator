@@ -109,11 +109,13 @@ impl ColPiece {
     }
 }
 
+type SquareIdx = u8;
+
 /// Square index newtype.
 ///
 /// A1 is (0, 0) -> 0, A2 is (0, 1) -> 2, and H8 is (7, 7) -> 63.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Square(usize);
+pub struct Square(SquareIdx);
 
 #[derive(Debug)]
 pub enum SquareError {
@@ -121,11 +123,11 @@ pub enum SquareError {
     InvalidCharacter(char),
 }
 
-impl TryFrom<usize> for Square {
+impl TryFrom<SquareIdx> for Square {
     type Error = SquareError;
 
-    fn try_from(value: usize) -> Result<Self, Self::Error> {
-        if (0..N_SQUARES).contains(&value) {
+    fn try_from(value: SquareIdx) -> Result<Self, Self::Error> {
+        if (0..N_SQUARES).contains(&value.into()) {
             Ok(Square(value))
         } else {
             Err(SquareError::OutOfBounds)
@@ -141,7 +143,7 @@ macro_rules! sq_try_from {
             fn try_from(value: $T) -> Result<Self, Self::Error> {
                 if let Ok(upper_bound) = <$T>::try_from(N_SQUARES) {
                     if (0..upper_bound).contains(&value) {
-                        return Ok(Square(value as usize));
+                        return Ok(Square(value as SquareIdx));
                     }
                 }
                 Err(SquareError::OutOfBounds)
@@ -150,13 +152,20 @@ macro_rules! sq_try_from {
     };
 }
 
+sq_try_from!(i8);
 sq_try_from!(i32);
 sq_try_from!(isize);
-sq_try_from!(i8);
+sq_try_from!(usize);
+
+impl From<Square> for SquareIdx {
+    fn from(value: Square) -> Self {
+        value.0
+    }
+}
 
 impl From<Square> for usize {
     fn from(value: Square) -> Self {
-        value.0
+        value.0.into()
     }
 }
 
@@ -181,10 +190,10 @@ impl Square {
     }
     fn to_row_col(self) -> (usize, usize) {
         //! Get row, column from index
-        let div = self.0 / BOARD_WIDTH;
-        let rem = self.0 % BOARD_WIDTH;
-        assert!(div <= 7);
-        assert!(rem <= 7);
+        let div = usize::from(self.0) / BOARD_WIDTH;
+        let rem = usize::from(self.0) % BOARD_WIDTH;
+        debug_assert!(div <= 7);
+        debug_assert!(rem <= 7);
         (div, rem)
     }
     fn to_row_col_signed(self) -> (isize, isize) {
@@ -313,7 +322,7 @@ impl Iterator for BitboardIterator {
             None
         } else {
             let next_idx = self.remaining.0.trailing_zeros() as usize;
-            let sq = Square(next_idx);
+            let sq = Square(next_idx.try_into().unwrap());
             self.remaining.off_sq(sq);
             Some(sq)
         }
@@ -620,10 +629,10 @@ mod tests {
             try_type!(i32);
             try_type!(i8);
             try_type!(isize);
-            try_type!(usize);
+            try_type!(u8);
         }
 
-        let good_cases = 0..N_SQUARES;
+        let good_cases = 0..SquareIdx::try_from(N_SQUARES).unwrap();
         for tc in good_cases {
             macro_rules! try_type {
                 ($T: ty) => {
@@ -635,7 +644,7 @@ mod tests {
             try_type!(i32);
             try_type!(i8);
             try_type!(isize);
-            try_type!(usize);
+            try_type!(u8);
         }
     }
 
@@ -653,10 +662,7 @@ mod tests {
 
     #[test]
     fn test_bitboard_iteration() {
-        let indices = [
-            0usize, 5usize, 17usize, 24usize, 34usize, 39usize, 42usize, 45usize, 49usize, 50usize,
-            63usize,
-        ];
+        let indices = [0, 5, 17, 24, 34, 39, 42, 45, 49, 50, 63];
 
         let mut bitboard = Bitboard::default();
 

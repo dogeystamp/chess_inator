@@ -228,8 +228,8 @@ impl Move {
                         );
                         // square to actually capture at
                         let ep_capture = Square::try_from(match pc_src.col {
-                            Color::White => self.dest.0 - BOARD_WIDTH,
-                            Color::Black => self.dest.0 + BOARD_WIDTH,
+                            Color::White => usize::from(self.dest.0) - BOARD_WIDTH,
+                            Color::Black => usize::from(self.dest.0) + BOARD_WIDTH,
                         })
                         .expect("En-passant capture square should be valid");
 
@@ -302,14 +302,16 @@ impl Move {
                         Color::White => {
                             if self.src == Square(0) {
                                 castle.q = false;
-                            } else if self.src == Square(BOARD_WIDTH - 1) {
+                            } else if self.src == Square::try_from(BOARD_WIDTH - 1).unwrap() {
                                 castle.k = false;
                             };
                         }
                         Color::Black => {
-                            if self.src == Square((BOARD_HEIGHT - 1) * BOARD_WIDTH) {
+                            if self.src
+                                == Square::try_from((BOARD_HEIGHT - 1) * BOARD_WIDTH).unwrap()
+                            {
                                 castle.q = false;
-                            } else if self.src == Square(N_SQUARES - 1) {
+                            } else if self.src == Square::try_from(N_SQUARES - 1).unwrap() {
                                 castle.k = false;
                             };
                         }
@@ -722,7 +724,7 @@ pub fn perft(depth: usize, pos: &mut Board) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fen::{ToFen, START_POSITION, FromFen};
+    use crate::fen::{FromFen, ToFen, START_POSITION};
 
     #[test]
     /// Ensure that bitboard properly reflects captures.

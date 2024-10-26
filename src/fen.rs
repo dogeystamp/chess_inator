@@ -1,4 +1,4 @@
-use crate::{Board, ColPiece, Color, Square, BOARD_HEIGHT, BOARD_WIDTH};
+use crate::{Board, ColPiece, Color, Square, SquareIdx, BOARD_HEIGHT, BOARD_WIDTH};
 
 pub const START_POSITION: &str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 
@@ -179,7 +179,7 @@ impl FromFen for Board {
                             parse_space_and_goto!(FenState::HalfMove);
                         }
                         'a'..='h' => {
-                            pos.ep_square = Some(Square(c as usize - 'a' as usize));
+                            pos.ep_square = Some(Square(c as SquareIdx - b'a'));
                             parser_state = FenState::EnPassantFile;
                         }
                         _ => return bad_char!(i, c),
@@ -188,8 +188,8 @@ impl FromFen for Board {
                 FenState::EnPassantFile => {
                     if let Some(digit) = c.to_digit(10) {
                         pos.ep_square = Some(Square(
-                            usize::from(pos.ep_square.unwrap_or(Square(0)))
-                                + (digit as usize - 1) * 8,
+                            SquareIdx::from(pos.ep_square.unwrap_or(Square(0)))
+                                + (digit as SquareIdx - 1) * 8,
                         ));
                     } else {
                         return bad_char!(i, c);
@@ -287,7 +287,7 @@ mod tests {
         let fen = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1";
         let board = Board::from_fen(fen.into()).unwrap();
         assert_eq!(
-            (0..N_SQUARES)
+            (0..SquareIdx::try_from(N_SQUARES).unwrap())
                 .map(Square)
                 .map(|i| board.get_piece(i))
                 .map(ColPiece::opt_to_char)
