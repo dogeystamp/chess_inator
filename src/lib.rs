@@ -16,6 +16,7 @@ Copyright © 2024 dogeystamp <dogeystamp@disroot.org>
 use std::fmt::Display;
 use std::str::FromStr;
 
+pub mod eval;
 pub mod fen;
 pub mod movegen;
 
