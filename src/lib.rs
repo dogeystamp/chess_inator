@@ -6,7 +6,7 @@ use std::str::FromStr;
 pub mod fen;
 pub mod movegen;
 
-use crate::fen::{FromFen, START_POSITION};
+use crate::fen::{FromFen, ToFen, START_POSITION};
 
 const BOARD_WIDTH: usize = 8;
 const BOARD_HEIGHT: usize = 8;
@@ -471,10 +471,8 @@ impl Board {
     /// Set the piece (or no piece) in a square, and return ("pop") the existing piece.
     fn set_square(&mut self, idx: Square, pc: Option<ColPiece>) -> Option<ColPiece> {
         match pc {
-            Some(pc) => {self.set_piece(idx, pc)},
-            None => {
-                self.del_piece(idx)
-            }
+            Some(pc) => self.set_piece(idx, pc),
+            None => self.del_piece(idx),
         }
     }
 
@@ -491,9 +489,12 @@ impl Board {
     }
 
     fn move_piece(&mut self, src: Square, dest: Square) {
-        let pc = self
-            .del_piece(src)
-            .unwrap_or_else(|| panic!("move ({src} -> {dest}) should have piece at source"));
+        let pc = self.del_piece(src).unwrap_or_else(|| {
+            panic!(
+                "move ({src} -> {dest}) should have piece at source (pos '{}')",
+                self.to_fen()
+            )
+        });
         self.set_piece(dest, pc);
     }
 

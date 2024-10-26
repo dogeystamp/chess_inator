@@ -1,8 +1,8 @@
 //! Generates moves from the FEN in the argv.
 
-use chess_inator::Board;
 use chess_inator::fen::FromFen;
 use chess_inator::movegen::LegalMoveGen;
+use chess_inator::Board;
 use std::env;
 
 fn main() {

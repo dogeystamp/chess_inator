@@ -2,8 +2,8 @@
 
 use crate::fen::{FromFen, ToFen, START_POSITION};
 use crate::{
-    Board, CastleRights, ColPiece, Color, Piece, Square, SquareError, BOARD_HEIGHT,
-    BOARD_WIDTH, N_SQUARES,
+    Board, CastleRights, ColPiece, Color, Piece, Square, SquareError, BOARD_HEIGHT, BOARD_WIDTH,
+    N_SQUARES,
 };
 use std::rc::Rc;
 
@@ -27,6 +27,7 @@ impl From<PromotePiece> for Piece {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
 enum AntiMoveType {
     Normal,
     /// En passant.
@@ -43,6 +44,7 @@ enum AntiMoveType {
 }
 
 /// Information used to reverse (unmake) a move.
+#[derive(Debug, Clone, Copy)]
 pub struct AntiMove {
     dest: Square,
     src: Square,
@@ -54,7 +56,7 @@ pub struct AntiMove {
     /// Castling rights prior to this move.
     castle: CastleRights,
     /// En passant target square prior to this move.
-    ep_square: Option<Square>
+    ep_square: Option<Square>,
 }
 
 impl AntiMove {
@@ -183,13 +185,14 @@ impl Move {
                 anti_move.move_type = AntiMoveType::Promotion;
 
                 pos.del_piece(self.src);
-                pos.set_piece(
+                let cap_pc = pos.set_piece(
                     self.dest,
                     ColPiece {
                         pc: Piece::from(to_piece),
                         col: pc_src.col,
                     },
                 );
+                anti_move.cap = cap_pc.map(|pc| pc.pc);
             }
             MoveType::Normal => {
                 let pc_src = pc_src!(self);
@@ -220,7 +223,10 @@ impl Move {
                     } else if pc_dest.is_none() && src_col != dest_col {
                         // we took en passant
                         debug_assert!(src_row.abs_diff(dest_row) == 1);
-                        assert_eq!(self.dest, ep_square.expect("ep target should exist if taking ep"));
+                        assert_eq!(
+                            self.dest,
+                            ep_square.expect("ep target should exist if taking ep")
+                        );
                         // square to actually capture at
                         let ep_capture = Square::try_from(match pc_src.col {
                             Color::White => self.dest.0 - BOARD_WIDTH,
@@ -228,7 +234,7 @@ impl Move {
                         })
                         .expect("En-passant capture square should be valid");
 
-                        anti_move.move_type = AntiMoveType::EnPassant{cap: ep_capture};
+                        anti_move.move_type = AntiMoveType::EnPassant { cap: ep_capture };
                         if let Some(pc_cap) = pos.del_piece(ep_capture) {
                             debug_assert_eq!(
                                 pc_cap.col,
@@ -723,7 +729,7 @@ fn is_check(board: &Board, pl: Color) -> bool {
 impl LegalMoveGen for Board {
     // mut required for check checking
     fn gen_moves(&self) -> impl IntoIterator<Item = Move> {
-        let mut pos = self.clone();
+        let mut pos = *self;
 
         pos.gen_pseudo_moves()
             .into_iter()
@@ -793,9 +799,7 @@ mod tests {
     }
 
     /// Helper to produce test cases.
-    fn decondense_moves(
-        test_case: (&str, Vec<(&str, Vec<&str>, MoveType)>),
-    ) -> (Board, Vec<Move>) {
+    fn decondense_moves(test_case: (&str, Vec<(&str, Vec<&str>, MoveType)>)) -> (Board, Vec<Move>) {
         let (fen, expected) = test_case;
         let board = Board::from_fen(fen).unwrap();
 
@@ -1306,6 +1310,14 @@ mod tests {
                     ),
                 ],
             ),
+            // promotion unmake regression test
+            (
+                "r3k2r/Pppp1ppp/1b3nbN/nP6/BBPPP3/q4N2/Pp4PP/R2Q1RK1 b kq - 0 1",
+                vec![(
+                    "b2a1q",
+                    "r3k2r/Pppp1ppp/1b3nbN/nP6/BBPPP3/q4N2/P5PP/q2Q1RK1 w kq - 0 2",
+                )],
+            ),
             // castling rights test (kings)
             (
                 "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2",
@@ -1369,9 +1381,13 @@ mod tests {
                 let anti_move = mv.make(&mut pos);
                 eprintln!("Unmaking {move_str} on {}.", pos.to_fen());
                 anti_move.unmake(&mut pos);
-                assert_eq!(pos.to_fen(), prior_fen.to_string());
+                assert_eq!(
+                    pos.to_fen(),
+                    prior_fen.to_string(),
+                    "failed unmake with {anti_move:?}"
+                );
                 eprintln!("Remaking {move_str}.");
-                let anti_move = mv.make(&mut pos);
+                let _anti_move = mv.make(&mut pos);
                 assert_eq!(pos.to_fen(), expect_fen.to_string());
             }
         }

@@ -1,8 +1,8 @@
 //! Runs perft at depth for a given FEN.
 
-use chess_inator::Board;
 use chess_inator::fen::FromFen;
 use chess_inator::movegen::perft;
+use chess_inator::Board;
 use std::env;
 
 fn main() {

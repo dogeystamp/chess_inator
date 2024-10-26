@@ -301,7 +301,7 @@ mod tests {
 
     macro_rules! make_board {
         ($fen_fmt: expr) => {
-            BoardState::from_fen(&format!($fen_fmt)).unwrap()
+            Board::from_fen(&format!($fen_fmt)).unwrap()
         };
     }
 
