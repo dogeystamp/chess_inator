@@ -39,6 +39,29 @@ impl From<PromotePiece> for Piece {
     }
 }
 
+impl From<PromotePiece> for char {
+    fn from(value: PromotePiece) -> Self {
+        Piece::from(value).into()
+    }
+}
+
+struct NonPromotePiece;
+
+impl TryFrom<Piece> for PromotePiece {
+    type Error = NonPromotePiece;
+
+    fn try_from(value: Piece) -> Result<Self, Self::Error> {
+        match value {
+            Piece::Rook => Ok(PromotePiece::Rook),
+            Piece::Bishop => Ok(PromotePiece::Bishop),
+            Piece::Knight => Ok(PromotePiece::Knight),
+            Piece::Queen => Ok(PromotePiece::Queen),
+            Piece::King => Err(NonPromotePiece),
+            Piece::Pawn => Err(NonPromotePiece),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 enum AntiMoveType {
     Normal,
@@ -360,6 +383,8 @@ pub enum MoveAlgebraicError {
     InvalidLength(usize),
     /// Invalid character at given index.
     InvalidCharacter(usize),
+    /// Can't promote to a given piece (char at given index).
+    InvalidPromotePiece(usize),
     /// Could not parse square string at a certain index.
     SquareError(usize, SquareError),
 }
@@ -391,13 +416,12 @@ impl FromUCIAlgebraic for Move {
 
         if value_len == 5 {
             let promote_char = value.as_bytes()[4] as char;
-            match promote_char {
-                'q' => move_type = MoveType::Promotion(PromotePiece::Queen),
-                'b' => move_type = MoveType::Promotion(PromotePiece::Bishop),
-                'n' => move_type = MoveType::Promotion(PromotePiece::Knight),
-                'r' => move_type = MoveType::Promotion(PromotePiece::Rook),
-                _ => return Err(MoveAlgebraicError::InvalidCharacter(4)),
-            }
+
+            let err = Err(MoveAlgebraicError::InvalidCharacter(4));
+            let pc = Piece::try_from(promote_char).or(err)?;
+
+            let err = Err(MoveAlgebraicError::InvalidPromotePiece(4));
+            move_type = MoveType::Promotion(PromotePiece::try_from(pc).or(err)?);
         }
 
         Ok(Move {
@@ -405,6 +429,17 @@ impl FromUCIAlgebraic for Move {
             dest: dest_sq,
             move_type,
         })
+    }
+}
+
+impl ToUCIAlgebraic for Move {
+    fn to_uci_algebraic(&self) -> String {
+        let prom_str = match self.move_type {
+            MoveType::Promotion(promote_piece) => char::from(promote_piece).to_string(),
+            _ => "".to_string(),
+        };
+
+        format!("{}{}{}", self.src, self.dest, prom_str)
     }
 }
 
@@ -1347,6 +1382,15 @@ mod tests {
                 let _anti_move = mv.make(&mut pos);
                 assert_eq!(pos.to_fen(), expect_fen.to_string());
             }
+        }
+    }
+
+    #[test]
+    fn test_uci_move_fmt() {
+        let test_cases = ["a1e5", "e7e8q", "e7e8r", "e7e8b", "e7e8n"];
+        for tc in test_cases {
+            let mv = Move::from_uci_algebraic(tc).unwrap();
+            assert_eq!(mv.to_uci_algebraic(), tc);
         }
     }
 
