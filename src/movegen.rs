@@ -5,7 +5,6 @@ use crate::{
     Board, CastleRights, ColPiece, Color, Piece, Square, SquareError, BOARD_HEIGHT, BOARD_WIDTH,
     N_SQUARES,
 };
-use std::rc::Rc;
 
 /// Piece enum specifically for promotions.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -394,18 +393,21 @@ impl FromUCIAlgebraic for Move {
     }
 }
 
-/// Pseudo-legal move generation.
-///
-/// "Pseudo-legal" here means that moving into check (but not castling through check) is allowed,
-/// and capturing friendly pieces is allowed. These will be filtered out in the legal move
-/// generation step.
-pub trait PseudoMoveGen {
-    fn gen_pseudo_moves(&self) -> impl IntoIterator<Item = Move>;
+#[derive(Debug, Clone, Copy)]
+pub enum MoveGenType {
+    /// Legal move generation.
+    Legal,
+    /// Allow capturing friendly pieces, moving into check, but not castling through check.
+    Pseudo,
 }
 
-const DIRS_STRAIGHT: [(isize, isize); 4] = [(0, 1), (1, 0), (-1, 0), (0, -1)];
-const DIRS_DIAG: [(isize, isize); 4] = [(1, 1), (1, -1), (-1, 1), (-1, -1)];
-const DIRS_STAR: [(isize, isize); 8] = [
+pub trait MoveGen {
+    fn gen_moves(&mut self, gen_type: MoveGenType) -> impl IntoIterator<Item = Move>;
+}
+
+pub const DIRS_STRAIGHT: [(isize, isize); 4] = [(0, 1), (1, 0), (-1, 0), (0, -1)];
+pub const DIRS_DIAG: [(isize, isize); 4] = [(1, 1), (1, -1), (-1, 1), (-1, -1)];
+pub const DIRS_STAR: [(isize, isize); 8] = [
     (1, 1),
     (1, -1),
     (-1, 1),
@@ -415,7 +417,7 @@ const DIRS_STAR: [(isize, isize); 8] = [
     (-1, 0),
     (0, -1),
 ];
-const DIRS_KNIGHT: [(isize, isize); 8] = [
+pub const DIRS_KNIGHT: [(isize, isize); 8] = [
     (2, 1),
     (1, 2),
     (-1, 2),
@@ -486,9 +488,31 @@ fn move_slider(
         }
     }
 }
+fn is_legal(board: &mut Board, mv: Move) -> bool {
+    // mut required for check checking
+    // disallow friendly fire
+    let src_pc = board
+        .get_piece(mv.src)
+        .expect("move source should have piece");
+    if let Some(dest_pc) = board.get_piece(mv.dest) {
+        if dest_pc.col == src_pc.col {
+            return false;
+        }
+    }
 
-impl PseudoMoveGen for Board {
-    fn gen_pseudo_moves(&self) -> impl IntoIterator<Item = Move> {
+    // disallow moving into check
+    let anti_move = mv.make(board);
+    let is_check = board.is_check(board.turn.flip());
+    anti_move.unmake(board);
+    if is_check {
+        return false;
+    }
+
+    true
+}
+
+impl MoveGen for Board {
+    fn gen_moves(&mut self, gen_type: MoveGenType) -> impl IntoIterator<Item = Move> {
         let mut ret = Vec::new();
         let pl = self.pl(self.turn);
         macro_rules! squares {
@@ -564,7 +588,7 @@ impl PseudoMoveGen for Board {
                     .map(|dest| {
                         let mut board = *self;
                         board.move_piece(src, dest);
-                        is_check(&board, self.turn)
+                        board.is_check(self.turn)
                     })
                     .any(|x| x);
                 if is_any_checked {
@@ -670,87 +694,10 @@ impl PseudoMoveGen for Board {
                 }
             }
         }
-        ret
-    }
-}
-
-/// Legal move generation.
-pub trait LegalMoveGen {
-    fn gen_moves(&self) -> impl IntoIterator<Item = Move>;
-}
-
-/// Is a given player in check?
-fn is_check(board: &Board, pl: Color) -> bool {
-    for src in board.pl(pl).board(Piece::King).into_iter() {
-        macro_rules! detect_checker {
-            ($dirs: ident, $pc: pat, $keep_going: expr) => {
-                for dir in $dirs.into_iter() {
-                    let (mut r, mut c) = src.to_row_col_signed();
-                    loop {
-                        let (nr, nc) = (r + dir.0, c + dir.1);
-                        if let Ok(sq) = Square::from_row_col_signed(nr, nc) {
-                            if let Some(pc) = board.get_piece(sq) {
-                                if matches!(pc.pc, $pc) && pc.col != pl {
-                                    return true;
-                                } else {
-                                    break;
-                                }
-                            }
-                        } else {
-                            break;
-                        }
-                        if (!($keep_going)) {
-                            break;
-                        }
-                        r = nr;
-                        c = nc;
-                    }
-                }
-            };
-        }
-
-        let dirs_white_pawn = [(-1, 1), (-1, -1)];
-        let dirs_black_pawn = [(1, 1), (1, -1)];
-
-        use Piece::*;
-
-        detect_checker!(DIRS_DIAG, Bishop | Queen, true);
-        detect_checker!(DIRS_STRAIGHT, Rook | Queen, true);
-        detect_checker!(DIRS_STAR, King, false);
-        detect_checker!(DIRS_KNIGHT, Knight, false);
-        match pl {
-            Color::White => detect_checker!(dirs_black_pawn, Pawn, false),
-            Color::Black => detect_checker!(dirs_white_pawn, Pawn, false),
-        }
-    }
-    false
-}
-
-impl LegalMoveGen for Board {
-    // mut required for check checking
-    fn gen_moves(&self) -> impl IntoIterator<Item = Move> {
-        let mut pos = *self;
-
-        pos.gen_pseudo_moves()
-            .into_iter()
-            .filter(|mv| {
-                // disallow friendly fire
-                let src_pc = self
-                    .get_piece(mv.src)
-                    .expect("move source should have piece");
-                if let Some(dest_pc) = self.get_piece(mv.dest) {
-                    return dest_pc.col != src_pc.col;
-                }
-                true
-            })
-            .filter(move |mv| {
-                // disallow moving into check
-                let anti_move = mv.make(&mut pos);
-                let ret = !is_check(&pos, self.turn);
-                anti_move.unmake(&mut pos);
-                ret
-            })
-            .collect::<Vec<_>>()
+        ret.into_iter().filter(move |mv| match gen_type {
+            MoveGenType::Legal => is_legal(self, *mv),
+            MoveGenType::Pseudo => true,
+        })
     }
 }
 
@@ -762,7 +709,7 @@ pub fn perft(depth: usize, pos: &mut Board) -> usize {
 
     let mut ans = 0;
 
-    let moves: Vec<Move> = pos.gen_moves().into_iter().collect();
+    let moves: Vec<Move> = pos.gen_moves(MoveGenType::Legal).into_iter().collect();
     for mv in moves {
         let anti_move = mv.make(pos);
         ans += perft(depth - 1, pos);
@@ -1083,8 +1030,8 @@ mod tests {
         let augmented_test_cases = test_cases.clone().map(|tc| flip_test_case(tc.0, &tc.1));
         let all_cases = [augmented_test_cases, test_cases].concat();
 
-        for (board, expected_moves) in all_cases {
-            let mut moves: Vec<Move> = board.gen_pseudo_moves().into_iter().collect();
+        for (mut board, expected_moves) in all_cases {
+            let mut moves: Vec<Move> = board.gen_moves(MoveGenType::Pseudo).into_iter().collect();
             moves.sort_unstable();
             let moves = moves;
 
@@ -1121,16 +1068,11 @@ mod tests {
         let all_cases = check_cases.iter().chain(&not_check_cases);
         for (fen, expected) in all_cases {
             let board = Board::from_fen(fen).unwrap();
-            assert_eq!(
-                is_check(&board, Color::White),
-                *expected,
-                "failed on {}",
-                fen
-            );
+            assert_eq!(board.is_check(Color::White), *expected, "failed on {}", fen);
 
             let board_anti = board.flip_colors();
             assert_eq!(
-                is_check(&board_anti, Color::Black),
+                board_anti.is_check(Color::Black),
                 *expected,
                 "failed on anti-version of {} ({})",
                 fen,
@@ -1244,7 +1186,7 @@ mod tests {
             expected_moves.sort_unstable();
             let expected_moves = expected_moves;
 
-            let mut moves: Vec<Move> = board.gen_moves().into_iter().collect();
+            let mut moves: Vec<Move> = board.gen_moves(MoveGenType::Legal).into_iter().collect();
             moves.sort_unstable();
             let moves = moves;
 

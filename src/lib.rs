@@ -7,6 +7,7 @@ pub mod fen;
 pub mod movegen;
 
 use crate::fen::{FromFen, ToFen, START_POSITION};
+use crate::movegen::Move;
 
 const BOARD_WIDTH: usize = 8;
 const BOARD_HEIGHT: usize = 8;
@@ -527,6 +528,55 @@ impl Board {
             new_board.set_square(sq, opt_pc);
         }
         new_board
+    }
+
+    /// Is a given player in check?
+    fn is_check(&self, pl: Color) -> bool {
+        for src in self.pl(pl).board(Piece::King).into_iter() {
+            macro_rules! detect_checker {
+                ($dirs: ident, $pc: pat, $keep_going: expr) => {
+                    for dir in $dirs.into_iter() {
+                        let (mut r, mut c) = src.to_row_col_signed();
+                        loop {
+                            let (nr, nc) = (r + dir.0, c + dir.1);
+                            if let Ok(sq) = Square::from_row_col_signed(nr, nc) {
+                                if let Some(pc) = self.get_piece(sq) {
+                                    if matches!(pc.pc, $pc) && pc.col != pl {
+                                        return true;
+                                    } else {
+                                        break;
+                                    }
+                                }
+                            } else {
+                                break;
+                            }
+                            if (!($keep_going)) {
+                                break;
+                            }
+                            r = nr;
+                            c = nc;
+                        }
+                    }
+                };
+            }
+
+            let dirs_white_pawn = [(-1, 1), (-1, -1)];
+            let dirs_black_pawn = [(1, 1), (1, -1)];
+
+            use Piece::*;
+
+            use movegen::{DIRS_DIAG, DIRS_KNIGHT, DIRS_STAR, DIRS_STRAIGHT};
+
+            detect_checker!(DIRS_DIAG, Bishop | Queen, true);
+            detect_checker!(DIRS_STRAIGHT, Rook | Queen, true);
+            detect_checker!(DIRS_STAR, King, false);
+            detect_checker!(DIRS_KNIGHT, Knight, false);
+            match pl {
+                Color::White => detect_checker!(dirs_black_pawn, Pawn, false),
+                Color::Black => detect_checker!(dirs_white_pawn, Pawn, false),
+            }
+        }
+        false
     }
 
     /// Maximum amount of moves in the counter to parse before giving up
