@@ -14,9 +14,12 @@ Copyright © 2024 dogeystamp <dogeystamp@disroot.org>
 //! Game-tree search.
 
 use crate::eval::{Eval, EvalInt};
-use crate::movegen::{Move, MoveGen, MoveGenType};
+use crate::movegen::{Move, MoveGen, MoveGenType, ToUCIAlgebraic};
 use crate::Board;
 use std::cmp::max;
+
+// min can't be represented as positive
+const EVAL_WORST: EvalInt = -(EvalInt::MAX);
 
 /// Search the game tree to find the absolute (positive good) eval for the current player.
 fn minmax(board: &mut Board, depth: usize) -> EvalInt {
@@ -30,7 +33,16 @@ fn minmax(board: &mut Board, depth: usize) -> EvalInt {
 
     let mvs: Vec<_> = board.gen_moves(MoveGenType::Legal).into_iter().collect();
 
-    let mut abs_best = EvalInt::MIN;
+    let mut abs_best = EVAL_WORST;
+
+    if mvs.is_empty() {
+        if board.is_check(board.turn) {
+            return EVAL_WORST;
+        } else {
+            // stalemate
+            return 0;
+        }
+    }
 
     for mv in mvs {
         let anti_mv = mv.make(board);
@@ -47,13 +59,13 @@ fn search(board: &mut Board) -> Option<Move> {
     let mvs: Vec<_> = board.gen_moves(MoveGenType::Legal).into_iter().collect();
 
     // absolute eval value
-    let mut best_eval = EvalInt::MIN;
+    let mut best_eval = EVAL_WORST;
     let mut best_mv: Option<Move> = None;
 
     for mv in mvs {
         let anti_mv = mv.make(board);
         let abs_eval = -minmax(board, DEPTH);
-        if abs_eval > best_eval {
+        if abs_eval >= best_eval {
             best_eval = abs_eval;
             best_mv = Some(mv);
         }
