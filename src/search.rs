@@ -34,7 +34,64 @@ mod test_eval_int {
     }
 }
 
-/// Search the game tree to find the absolute (positive good) eval for the current player.
+/// Eval in the context of search.
+#[derive(PartialEq, Eq, Clone, Copy)]
+enum SearchEval {
+    /// Mate in |n| - 1 half moves, negative for own mate.
+    Checkmate(i8),
+    /// Centipawn score.
+    Centipawns(EvalInt),
+}
+
+impl SearchEval {
+    /// Flip side, and increment the "mate in n" counter.
+    fn increment(self) -> Self {
+        match self {
+            SearchEval::Checkmate(n) => {
+                debug_assert_ne!(n, 0);
+                if n < 0 {
+                    Self::Checkmate(-(n - 1))
+                } else {
+                    Self::Checkmate(-(n + 1))
+                }
+            }
+            SearchEval::Centipawns(eval) => Self::Centipawns(-eval),
+        }
+    }
+}
+
+impl From<SearchEval> for EvalInt {
+    fn from(value: SearchEval) -> Self {
+        match value {
+            SearchEval::Checkmate(n) => {
+                debug_assert_ne!(n, 0);
+                if n < 0 {
+                    EVAL_WORST + EvalInt::from(n)
+                } else {
+                    EVAL_BEST - EvalInt::from(n)
+                }
+            }
+            SearchEval::Centipawns(eval) => eval,
+        }
+    }
+}
+
+impl Ord for SearchEval {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        let e1 = EvalInt::from(*self);
+        let e2 = EvalInt::from(*other);
+        e1.cmp(&e2)
+    }
+}
+
+impl PartialOrd for SearchEval {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+/// Search the game tree to find the absolute (positive good) move and corresponding eval for the
+/// current player.
 ///
 /// # Arguments
 ///
@@ -42,7 +99,16 @@ mod test_eval_int {
 /// * depth: how deep to analyze the game tree.
 /// * alpha: best score (absolute, from current player perspective) guaranteed for current player.
 /// * beta: best score (absolute, from current player perspective) guaranteed for other player.
-fn minmax(board: &mut Board, depth: usize, alpha: Option<EvalInt>, beta: Option<EvalInt>) -> EvalInt {
+///
+/// # Returns
+///
+/// The best move, and its corresponding absolute eval for the current player.
+fn minmax(
+    board: &mut Board,
+    depth: usize,
+    alpha: Option<EvalInt>,
+    beta: Option<EvalInt>,
+) -> (Option<Move>, SearchEval) {
     // default to worst, then gradually improve
     let mut alpha = alpha.unwrap_or(EVAL_WORST);
     // our best is their worst
@@ -51,31 +117,36 @@ fn minmax(board: &mut Board, depth: usize, alpha: Option<EvalInt>, beta: Option<
     if depth == 0 {
         let eval = board.eval();
         match board.turn {
-            crate::Color::White => return eval,
-            crate::Color::Black => return -eval,
+            crate::Color::White => return (None, SearchEval::Centipawns(eval)),
+            crate::Color::Black => return (None, SearchEval::Centipawns(-eval)),
         }
     }
 
     let mvs: Vec<_> = board.gen_moves().into_iter().collect();
 
-    let mut abs_best = EVAL_WORST;
+    let mut abs_best = SearchEval::Centipawns(EVAL_WORST);
+    let mut best_move: Option<Move> = None;
 
     if mvs.is_empty() {
         if board.is_check(board.turn) {
-            return EVAL_WORST;
+            return (None, SearchEval::Checkmate(-1));
         } else {
             // stalemate
-            return 0;
+            return (None, SearchEval::Centipawns(0));
         }
     }
 
     for mv in mvs {
         let anti_mv = mv.make(board);
-        let abs_score = -minmax(board, depth - 1, Some(-beta), Some(-alpha));
-        abs_best = max(abs_best, abs_score);
-        alpha = max(alpha, abs_best);
+        let (_best_continuation, score) = minmax(board, depth - 1, Some(-beta), Some(-alpha));
+        let abs_score = score.increment();
+        if abs_score >= abs_best {
+            abs_best = abs_score;
+            best_move = Some(mv);
+        }
+        alpha = max(alpha, abs_best.into());
         anti_mv.unmake(board);
-        if alpha >= beta  {
+        if alpha >= beta {
             // alpha-beta prune.
             //
             // Beta represents the best eval that the other player can get in sibling branches
@@ -86,32 +157,15 @@ fn minmax(board: &mut Board, depth: usize, alpha: Option<EvalInt>, beta: Option<
         }
     }
 
-    abs_best
-}
-
-/// Find the best move for a position (internal interface).
-fn search(board: &mut Board) -> Option<Move> {
-    const DEPTH: usize = 4;
-    let mvs: Vec<_> = board.gen_moves().into_iter().collect();
-
-    // absolute eval value
-    let mut best_eval = EVAL_WORST;
-    let mut best_mv: Option<Move> = None;
-
-    for mv in mvs {
-        let anti_mv = mv.make(board);
-        let abs_eval = -minmax(board, DEPTH, None, None);
-        if abs_eval >= best_eval {
-            best_eval = abs_eval;
-            best_mv = Some(mv);
-        }
-        anti_mv.unmake(board);
-    }
-
-    best_mv
+    (best_move, abs_best)
 }
 
 /// Find the best move.
 pub fn best_move(board: &mut Board) -> Option<Move> {
-    search(board)
+    let (mv, eval) = minmax(board, 5, None, None);
+    match eval {
+        SearchEval::Checkmate(n) => println!("info score mate {}", n / 2),
+        SearchEval::Centipawns(eval) => println!("info score cp {eval}"),
+    }
+    mv
 }
