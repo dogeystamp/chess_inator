@@ -1,7 +1,6 @@
 /*
 
 This file is part of chess_inator.
-
 chess_inator is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation; either version 3 of the License, or (at your option) any later version.
 
 chess_inator is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
@@ -13,9 +12,10 @@ Copyright © 2024 dogeystamp <dogeystamp@disroot.org>
 
 //! Main UCI engine binary.
 
+use chess_inator::eval::EvalInt;
 use chess_inator::fen::FromFen;
 use chess_inator::movegen::{FromUCIAlgebraic, Move, ToUCIAlgebraic};
-use chess_inator::search::best_move;
+use chess_inator::search::{best_line, SearchEval};
 use chess_inator::Board;
 use std::io;
 
@@ -88,7 +88,24 @@ fn cmd_position(mut tokens: std::str::SplitWhitespace<'_>) -> Board {
 
 /// Play the game.
 fn cmd_go(mut _tokens: std::str::SplitWhitespace<'_>, board: &mut Board) {
-    let chosen = best_move(board);
+    let (line, eval) = best_line(board);
+    let chosen = line.last().copied();
+    println!(
+        "info pv{}",
+        line.iter()
+            .rev()
+            .map(|mv| mv.to_uci_algebraic())
+            .fold(String::new(), |a, b| a + " " + &b)
+    );
+    match eval {
+        SearchEval::Checkmate(n) => println!("info score mate {}", n / 2),
+        SearchEval::Centipawns(eval) => {
+            println!(
+                "info score cp {}",
+                eval,
+            )
+        }
+    }
     match chosen {
         Some(mv) => println!("bestmove {}", mv.to_uci_algebraic()),
         None => println!("bestmove 0000"),

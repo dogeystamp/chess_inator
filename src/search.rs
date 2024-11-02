@@ -14,7 +14,7 @@ Copyright © 2024 dogeystamp <dogeystamp@disroot.org>
 //! Game-tree search.
 
 use crate::eval::{Eval, EvalInt};
-use crate::movegen::{Move, MoveGen, ToUCIAlgebraic};
+use crate::movegen::{Move, MoveGen};
 use crate::Board;
 use std::cmp::max;
 
@@ -35,8 +35,8 @@ mod test_eval_int {
 }
 
 /// Eval in the context of search.
-#[derive(PartialEq, Eq, Clone, Copy)]
-enum SearchEval {
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
+pub enum SearchEval {
     /// Mate in |n| - 1 half moves, negative for own mate.
     Checkmate(i8),
     /// Centipawn score.
@@ -66,7 +66,7 @@ impl From<SearchEval> for EvalInt {
             SearchEval::Checkmate(n) => {
                 debug_assert_ne!(n, 0);
                 if n < 0 {
-                    EVAL_WORST + EvalInt::from(n)
+                    EVAL_WORST - EvalInt::from(n)
                 } else {
                     EVAL_BEST - EvalInt::from(n)
                 }
@@ -102,13 +102,13 @@ impl PartialOrd for SearchEval {
 ///
 /// # Returns
 ///
-/// The best move, and its corresponding absolute eval for the current player.
+/// The best line (in reverse move order), and its corresponding absolute eval for the current player.
 fn minmax(
     board: &mut Board,
     depth: usize,
     alpha: Option<EvalInt>,
     beta: Option<EvalInt>,
-) -> (Option<Move>, SearchEval) {
+) -> (Vec<Move>, SearchEval) {
     // default to worst, then gradually improve
     let mut alpha = alpha.unwrap_or(EVAL_WORST);
     // our best is their worst
@@ -116,33 +116,35 @@ fn minmax(
 
     if depth == 0 {
         let eval = board.eval();
-        match board.turn {
-            crate::Color::White => return (None, SearchEval::Centipawns(eval)),
-            crate::Color::Black => return (None, SearchEval::Centipawns(-eval)),
-        }
+        return (
+            Vec::new(),
+            SearchEval::Centipawns(eval * EvalInt::from(board.turn.sign())),
+        );
     }
 
     let mvs: Vec<_> = board.gen_moves().into_iter().collect();
 
     let mut abs_best = SearchEval::Centipawns(EVAL_WORST);
     let mut best_move: Option<Move> = None;
+    let mut best_continuation: Vec<Move> = Vec::new();
 
     if mvs.is_empty() {
         if board.is_check(board.turn) {
-            return (None, SearchEval::Checkmate(-1));
+            return (Vec::new(), SearchEval::Checkmate(-1));
         } else {
             // stalemate
-            return (None, SearchEval::Centipawns(0));
+            return (Vec::new(), SearchEval::Centipawns(0));
         }
     }
 
     for mv in mvs {
         let anti_mv = mv.make(board);
-        let (_best_continuation, score) = minmax(board, depth - 1, Some(-beta), Some(-alpha));
+        let (continuation, score) = minmax(board, depth - 1, Some(-beta), Some(-alpha));
         let abs_score = score.increment();
-        if abs_score >= abs_best {
+        if abs_score > abs_best {
             abs_best = abs_score;
             best_move = Some(mv);
+            best_continuation = continuation;
         }
         alpha = max(alpha, abs_best.into());
         anti_mv.unmake(board);
@@ -150,22 +152,28 @@ fn minmax(
             // alpha-beta prune.
             //
             // Beta represents the best eval that the other player can get in sibling branches
-            // (different moves in the parent node). Alpha >= beta means the eval here is _worse_
+            // (different moves in the parent node). Alpha > beta means the eval here is _worse_
             // for the other player, so they will never make the move that leads into this branch.
             // Therefore, we stop evaluating this branch at all.
             break;
         }
     }
 
-    (best_move, abs_best)
+    if let Some(mv) = best_move {
+        best_continuation.push(mv);
+    }
+
+    (best_continuation, abs_best)
+}
+
+/// Find the best line (in reverse order) and its evaluation.
+pub fn best_line(board: &mut Board) -> (Vec<Move>, SearchEval) {
+    let (line, eval) = minmax(board, 5, None, None);
+    (line, eval)
 }
 
 /// Find the best move.
 pub fn best_move(board: &mut Board) -> Option<Move> {
-    let (mv, eval) = minmax(board, 5, None, None);
-    match eval {
-        SearchEval::Checkmate(n) => println!("info score mate {}", n / 2),
-        SearchEval::Centipawns(eval) => println!("info score cp {eval}"),
-    }
-    mv
+    let (line, _eval) = best_line(board);
+    line.last().copied()
 }

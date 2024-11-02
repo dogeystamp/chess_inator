@@ -23,6 +23,8 @@ pub type EvalInt = i16;
 
 pub trait Eval {
     /// Evaluate a position and assign it a score.
+    ///
+    /// Negative for Black advantage and positive for White.
     fn eval(&self) -> EvalInt;
 }
 
@@ -46,6 +48,7 @@ pub(crate) mod eval_score {
     /// Score from a given perspective (e.g. midgame, endgame).
     #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Default, Debug)]
     pub struct EvalScore {
+        /// Signed score.
         pub score: EvalInt,
     }
 
@@ -234,8 +237,21 @@ pub const PST_MIDGAME: Pst = Pst([
     ], 100),
 ]);
 
+/// Calculate evaluation without incremental updates.
+pub(crate) fn refresh_eval(board: &Board) -> EvalInt {
+    let mut eval: EvalInt = 0;
+    for sq in Board::squares() {
+        if let Some(pc) = board.get_piece(sq) {
+            eval += PST_MIDGAME[pc.pc][pc.col][sq] * EvalInt::from(pc.col.sign());
+        }
+    }
+    eval
+}
+
 impl Eval for Board {
     fn eval(&self) -> EvalInt {
+        let score_incremental = self.eval.midgame.score;
+        debug_assert_eq!(refresh_eval(self), score_incremental);
         self.eval.midgame.score
     }
 }

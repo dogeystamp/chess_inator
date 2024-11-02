@@ -585,6 +585,11 @@ impl Board {
         false
     }
 
+    /// Get the current player to move.
+    pub fn get_turn(&self) -> Color {
+        self.turn
+    }
+
     /// Maximum amount of moves in the counter to parse before giving up
     const MAX_MOVES: usize = 9_999;
 }
