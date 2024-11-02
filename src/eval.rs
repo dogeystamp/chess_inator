@@ -13,7 +13,8 @@ Copyright © 2024 dogeystamp <dogeystamp@disroot.org>
 
 //! Position evaluation.
 
-use crate::{Board, Color, N_PIECES};
+use crate::{Board, Color, Piece, Square, N_COLORS, N_PIECES, N_SQUARES};
+use core::ops::Index;
 
 /// Signed centipawn type.
 ///
@@ -25,31 +26,217 @@ pub trait Eval {
     fn eval(&self) -> EvalInt;
 }
 
-impl Eval for Board {
-    fn eval(&self) -> EvalInt {
-        use crate::Piece::*;
-        let mut score: EvalInt = 0;
+pub(crate) mod eval_score {
+    //! Opaque "score" counters to be used in the board.
 
-        // scores in centipawns for each piece
-        let material_score: [EvalInt; N_PIECES] = [
-            500,   // rook
-            300,   // bishop
-            300,   // knight
-            20000, // king
-            900,   // queen
-            100,   // pawn
-        ];
+    use super::{EvalInt, Pst};
+    use crate::{ColPiece, Square};
 
-        for pc in [Rook, Queen, Pawn, Knight, Bishop, King] {
-            let tally_white = self[Color::White][pc].0.count_ones();
-            let tally_black = self[Color::Black][pc].0.count_ones();
-            let tally =
-                EvalInt::try_from(tally_white).unwrap() - EvalInt::try_from(tally_black).unwrap();
+    /// Internal score-keeping for a board.
+    ///
+    /// This is kept in order to efficiently update evaluation with moves.
+    #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Default, Debug)]
+    pub struct EvalScores {
+        /// Middle-game perspective evaluation of this board.
+        pub midgame: EvalScore,
+        /// End-game perspective evaluation of this board.
+        pub endgame: EvalScore,
+    }
 
-            score += material_score[pc as usize] * tally;
+    /// Score from a given perspective (e.g. midgame, endgame).
+    #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Default, Debug)]
+    pub struct EvalScore {
+        pub(crate) score: EvalInt,
+    }
+
+    impl EvalScore {
+        /// Remove the value of a piece on a square.
+        pub fn del_piece(&mut self, pc: ColPiece, sq: Square, pst: &Pst) {
+            self.score -= pst[pc.pc][pc.col][sq] * EvalInt::from(pc.col.sign());
         }
 
-        score
+        /// Add the value of a piece on a square.
+        pub fn add_piece(&mut self, pc: ColPiece, sq: Square, pst: &Pst) {
+            self.score += pst[pc.pc][pc.col][sq] * EvalInt::from(pc.col.sign());
+        }
+    }
+}
+
+/// The main piece-square-table (PST) type that assigns scores to pieces on given squares.
+///
+/// This is the main source of positional knowledge, as well as the ability to count material.
+pub struct Pst([PstPiece; N_PIECES]);
+/// A PST for a specific piece.
+type PstPiece = [PstSide; N_COLORS];
+/// A PST for a given piece, of a given color.
+type PstSide = [EvalInt; N_SQUARES];
+
+impl Index<Piece> for Pst {
+    type Output = PstPiece;
+
+    fn index(&self, index: Piece) -> &Self::Output {
+        &self.0[index as usize]
+    }
+}
+
+impl Index<Color> for PstPiece {
+    type Output = PstSide;
+
+    fn index(&self, index: Color) -> &Self::Output {
+        &self[index as usize]
+    }
+}
+
+impl Index<Square> for PstSide {
+    type Output = EvalInt;
+
+    fn index(&self, index: Square) -> &Self::Output {
+        &self[usize::from(index)]
+    }
+}
+
+#[rustfmt::skip]
+const PERSPECTIVE_WHITE: [usize; N_SQUARES] = [
+    56, 57, 58, 59, 60, 61, 62, 63,
+    48, 49, 50, 51, 52, 53, 54, 55,
+    40, 41, 42, 43, 44, 45, 46, 47,
+    32, 33, 34, 35, 36, 37, 38, 39,
+    24, 25, 26, 27, 28, 29, 30, 31,
+    16, 17, 18, 19, 20, 21, 22, 23,
+     8,  9, 10, 11, 12, 13, 14, 15,
+     0,  1,  2,  3,  4,  5,  6,  7,
+];
+
+/// This perspective is also horizontally reversed so the king is on the right side.
+#[rustfmt::skip]
+const PERSPECTIVE_BLACK: [usize; N_SQUARES] = [
+     0,  1,  2,  3,  4,  5,  6,  7,
+     8,  9, 10, 11, 12, 13, 14, 15,
+    16, 17, 18, 19, 20, 21, 22, 23,
+    24, 25, 26, 27, 28, 29, 30, 31,
+    32, 33, 34, 35, 36, 37, 38, 39,
+    40, 41, 42, 43, 44, 45, 46, 47,
+    48, 49, 50, 51, 52, 53, 54, 55,
+    56, 57, 58, 59, 60, 61, 62, 63,
+];
+
+/// Helper to have the right board perspective in the source code.
+///
+/// In the source code, a1 will be at the bottom left, while h8 will be at the top right,
+/// corresponding to how humans usually see the board. This means that a8 is index 0, and h1 is
+/// index 63. This function shifts it so that a1 is 0, and h8 is 63, as in our implementation.
+///
+/// # Arguments
+/// * pst: Square values in centipawns.
+/// * base_val: The base value of the piece, which is added to every square.
+const fn pst_perspective(
+    pst: PstSide,
+    base_val: EvalInt,
+    perspective: [usize; N_SQUARES],
+) -> PstSide {
+    let mut ret = pst;
+    let mut i = 0;
+    while i < N_SQUARES {
+        let j = perspective[i];
+        ret[i] = pst[j] + base_val;
+        i += 1;
+    }
+    ret
+}
+
+/// Construct PSTs for a single piece, from white's perspective.
+const fn make_pst(val: PstSide, base_val: EvalInt) -> PstPiece {
+    [
+        pst_perspective(val, base_val, PERSPECTIVE_WHITE),
+        pst_perspective(val, base_val, PERSPECTIVE_BLACK),
+    ]
+}
+
+/// Middle-game PSTs.
+#[rustfmt::skip]
+pub const PST_MIDGAME: Pst = Pst([
+    // rook
+    make_pst([
+        0,   0,   0,   0,   0,   0,   0,   0, // 8
+       20,  20,  20,  20,  20,  20,  20,  20, // 7
+        0,   0,   0,   0,   0,   0,   0,   0, // 6
+        0,   0,   0,   0,   0,   0,   0,   0, // 5
+        0,   0,   0,   0,   0,   0,   0,   0, // 4
+        0,   0,   0,   0,   0,   0,   0,   0, // 3
+        0,   0,   0,   0,   0,   0,   0,   0, // 2
+        0,   0,   0,  10,  10,   5,   0,   0, // 1
+    //  a    b    c    d    e    f    g    h
+    ], 500),
+
+    // bishop
+    make_pst([
+        0,   0,   0,   0,   0,   0,   0,   0, // 8
+        0,   0,   0,   0,   0,   0,   0,   0, // 7
+        0,   0,   0,   0,   0,   0,   0,   0, // 6
+        0,   0,   0,   0,   0,   0,   0,   0, // 5
+        0,   0,   0,   0,   0,   0,   0,   0, // 4
+        0,   0,   0,   0,   0,   0,   0,   0, // 3
+        0,   0,   0,   0,   0,   0,   0,   0, // 2
+        0,   0, -10,   0,   0, -10,   0,   0, // 1
+    //  a    b    c    d    e    f    g    h
+    ], 300),
+
+    // knight
+    make_pst([
+        0,   0,   0,   0,   0,   0,   0,   0, // 8
+        0,   0,   0,   0,   0,   0,   0,   0, // 7
+        0,   0,   0,   0,   0,   0,   0,   0, // 6
+        0,   0,   0,  10,  10,   0,   0,   0, // 5
+        0,   0,   0,  10,  10,   0,   0,   0, // 4
+        0,   0,  10,   0,   0,  10,   0,   0, // 3
+        0,   0,   0,   0,   0,   0,   0,   0, // 2
+        0,   0,   0,   0,   0,   0,   0,   0, // 1
+    //  a    b    c    d    e    f    g    h
+    ], 300),
+
+    // king
+    make_pst([
+        0,   0,   0,   0,   0,   0,   0,   0, // 8
+        0,   0,   0,   0,   0,   0,   0,   0, // 7
+        0,   0,   0,   0,   0,   0,   0,   0, // 6
+        0,   0,   0,   0,   0,   0,   0,   0, // 5
+        0,   0,   0,   0,   0,   0,   0,   0, // 4
+        0,   0,   0,   0,   0,   0,   0,   0, // 3
+        0,   0,   0,   0,   0,   0,   0,   0, // 2
+        0,   0,  10,   0,   0,   0,  20,   0, // 1
+    //  a    b    c    d    e    f    g    h
+    ], 20_000),
+
+    // queen
+    make_pst([
+        0,   0,   0,   0,   0,   0,   0,   0, // 8
+        0,   0,   0,   0,   0,   0,   0,   0, // 7
+        0,   0,   0,   0,   0,   0,   0,   0, // 6
+        0,   0,   0,   0,   0,   0,   0,   0, // 5
+        0,   0,   0,   0,   0,   0,   0,   0, // 4
+        0,   0,   0,   0,   0,   0,   0,   0, // 3
+        0,   0,   0,   0,   0,   0,   0,   0, // 2
+        0,   0,   0,   0,   0,   0,   0,   0, // 1
+    //  a    b    c    d    e    f    g    h
+    ], 900),
+
+    // pawn
+    make_pst([
+       10,  10,  10,  10,  10,  10,  10,  10, // 8
+        9,   9,   9,   9,   9,   9,   9,   9, // 7
+        8,   8,   8,   8,   8,   8,   8,   8, // 6
+        7,   7,   7,   8,   8,   7,   7,   7, // 5
+        6,   6,   6,   6,   6,   6,   6,   6, // 4
+        2,   2,   2,   4,   4,   0,   2,   0, // 3
+        0,   0,   0,   0,   0,   0,   0,   0, // 2
+        0,   0,   0,   0,   0,   0,   0,   0, // 1
+    //  a    b    c    d    e    f    g    h
+    ], 100),
+]);
+
+impl Eval for Board {
+    fn eval(&self) -> EvalInt {
+        self.eval.midgame.score
     }
 }
 

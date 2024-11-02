@@ -672,11 +672,7 @@ impl MoveGenInternal for Board {
                 Color::Black => 0,
             };
 
-            let nr = (r)
-                + match self.turn {
-                    Color::White => 1,
-                    Color::Black => -1,
-                };
+            let nr = r + isize::from(self.turn.sign());
             let is_promotion = nr == last_row;
 
             macro_rules! push_moves {
@@ -1093,7 +1089,10 @@ mod tests {
         let all_cases = [augmented_test_cases, test_cases].concat();
 
         for (mut board, expected_moves) in all_cases {
-            let mut moves: Vec<Move> = board.gen_moves_general(MoveGenType::Pseudo).into_iter().collect();
+            let mut moves: Vec<Move> = board
+                .gen_moves_general(MoveGenType::Pseudo)
+                .into_iter()
+                .collect();
             moves.sort_unstable();
             let moves = moves;
 

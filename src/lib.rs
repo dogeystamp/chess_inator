@@ -23,6 +23,8 @@ pub mod movegen;
 pub mod search;
 
 use crate::fen::{FromFen, ToFen, START_POSITION};
+use eval::eval_score::EvalScores;
+use eval::PST_MIDGAME;
 
 const BOARD_WIDTH: usize = 8;
 const BOARD_HEIGHT: usize = 8;
@@ -42,6 +44,12 @@ impl Color {
         match self {
             Color::White => Color::Black,
             Color::Black => Color::White,
+        }
+    }
+    pub fn sign(&self) -> i8 {
+        match self {
+            Color::White => 1,
+            Color::Black => -1,
         }
     }
 }
@@ -439,6 +447,9 @@ pub struct Board {
 
     /// Whose turn it is
     turn: Color,
+
+    /// Counters for evaluation.
+    eval: EvalScores,
 }
 
 impl Board {
@@ -453,11 +464,12 @@ impl Board {
     }
 
     /// Create a new piece in a location, and pop any existing piece in the destination.
-    pub fn set_piece(&mut self, idx: Square, pc: ColPiece) -> Option<ColPiece> {
-        let dest_pc = self.del_piece(idx);
+    pub fn set_piece(&mut self, sq: Square, pc: ColPiece) -> Option<ColPiece> {
+        let dest_pc = self.del_piece(sq);
         let pl = &mut self[pc.col];
-        pl[pc.into()].on_sq(idx);
-        *self.mail.sq_mut(idx) = Some(pc);
+        pl[pc.into()].on_sq(sq);
+        *self.mail.sq_mut(sq) = Some(pc);
+        self.eval.midgame.add_piece(pc, sq, &PST_MIDGAME);
         dest_pc
     }
 
@@ -470,11 +482,12 @@ impl Board {
     }
 
     /// Delete the piece in a location, and return ("pop") that piece.
-    pub fn del_piece(&mut self, idx: Square) -> Option<ColPiece> {
-        if let Some(pc) = *self.mail.sq_mut(idx) {
+    pub fn del_piece(&mut self, sq: Square) -> Option<ColPiece> {
+        if let Some(pc) = *self.mail.sq_mut(sq) {
             let pl = &mut self[pc.col];
-            pl[pc.into()].off_sq(idx);
-            *self.mail.sq_mut(idx) = None;
+            pl[pc.into()].off_sq(sq);
+            *self.mail.sq_mut(sq) = None;
+            self.eval.midgame.del_piece(pc, sq, &PST_MIDGAME);
             Some(pc)
         } else {
             None
@@ -508,6 +521,7 @@ impl Board {
             mail: Default::default(),
             ep_square: self.ep_square.map(|sq| sq.mirror_vert()),
             castle: CastleRights(self.castle.0),
+            eval: Default::default(),
         };
 
         new_board.castle.0.reverse();
