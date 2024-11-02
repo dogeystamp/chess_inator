@@ -14,7 +14,7 @@ Copyright © 2024 dogeystamp <dogeystamp@disroot.org>
 //! Game-tree search.
 
 use crate::eval::{Eval, EvalInt};
-use crate::movegen::{Move, MoveGen, MoveGenType, ToUCIAlgebraic};
+use crate::movegen::{Move, MoveGen, ToUCIAlgebraic};
 use crate::Board;
 use std::cmp::max;
 
@@ -56,7 +56,7 @@ fn minmax(board: &mut Board, depth: usize, alpha: Option<EvalInt>, beta: Option<
         }
     }
 
-    let mvs: Vec<_> = board.gen_moves(MoveGenType::Legal).into_iter().collect();
+    let mvs: Vec<_> = board.gen_moves().into_iter().collect();
 
     let mut abs_best = EVAL_WORST;
 
@@ -92,7 +92,7 @@ fn minmax(board: &mut Board, depth: usize, alpha: Option<EvalInt>, beta: Option<
 /// Find the best move for a position (internal interface).
 fn search(board: &mut Board) -> Option<Move> {
     const DEPTH: usize = 4;
-    let mvs: Vec<_> = board.gen_moves(MoveGenType::Legal).into_iter().collect();
+    let mvs: Vec<_> = board.gen_moves().into_iter().collect();
 
     // absolute eval value
     let mut best_eval = EVAL_WORST;

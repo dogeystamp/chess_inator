@@ -14,7 +14,7 @@ Copyright © 2024 dogeystamp <dogeystamp@disroot.org>
 //! Main UCI engine binary.
 
 use chess_inator::fen::FromFen;
-use chess_inator::movegen::{FromUCIAlgebraic, Move, MoveGen, MoveGenType, ToUCIAlgebraic};
+use chess_inator::movegen::{FromUCIAlgebraic, Move, ToUCIAlgebraic};
 use chess_inator::search::best_move;
 use chess_inator::Board;
 use std::io;

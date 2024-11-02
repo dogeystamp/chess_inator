@@ -444,15 +444,27 @@ impl ToUCIAlgebraic for Move {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub enum MoveGenType {
+enum MoveGenType {
     /// Legal move generation.
     Legal,
     /// Allow capturing friendly pieces, moving into check, but not castling through check.
     Pseudo,
 }
 
+/// Internal, slightly more general movegen interface
+trait MoveGenInternal {
+    fn gen_moves_general(&mut self, gen_type: MoveGenType) -> impl IntoIterator<Item = Move>;
+}
+
 pub trait MoveGen {
-    fn gen_moves(&mut self, gen_type: MoveGenType) -> impl IntoIterator<Item = Move>;
+    /// Legal move generation.
+    fn gen_moves(&mut self) -> impl IntoIterator<Item = Move>;
+}
+
+impl<T: MoveGenInternal> MoveGen for T {
+    fn gen_moves(&mut self) -> impl IntoIterator<Item = Move> {
+        self.gen_moves_general(MoveGenType::Legal)
+    }
 }
 
 pub const DIRS_STRAIGHT: [(isize, isize); 4] = [(0, 1), (1, 0), (-1, 0), (0, -1)];
@@ -561,8 +573,8 @@ fn is_legal(board: &mut Board, mv: Move) -> bool {
     true
 }
 
-impl MoveGen for Board {
-    fn gen_moves(&mut self, gen_type: MoveGenType) -> impl IntoIterator<Item = Move> {
+impl MoveGenInternal for Board {
+    fn gen_moves_general(&mut self, gen_type: MoveGenType) -> impl IntoIterator<Item = Move> {
         let mut ret = Vec::new();
         let pl = self[self.turn];
         macro_rules! squares {
@@ -759,7 +771,7 @@ pub fn perft(depth: usize, pos: &mut Board) -> usize {
 
     let mut ans = 0;
 
-    let moves: Vec<Move> = pos.gen_moves(MoveGenType::Legal).into_iter().collect();
+    let moves: Vec<Move> = pos.gen_moves().into_iter().collect();
     for mv in moves {
         let anti_move = mv.make(pos);
         ans += perft(depth - 1, pos);
@@ -1081,7 +1093,7 @@ mod tests {
         let all_cases = [augmented_test_cases, test_cases].concat();
 
         for (mut board, expected_moves) in all_cases {
-            let mut moves: Vec<Move> = board.gen_moves(MoveGenType::Pseudo).into_iter().collect();
+            let mut moves: Vec<Move> = board.gen_moves_general(MoveGenType::Pseudo).into_iter().collect();
             moves.sort_unstable();
             let moves = moves;
 
@@ -1236,7 +1248,7 @@ mod tests {
             expected_moves.sort_unstable();
             let expected_moves = expected_moves;
 
-            let mut moves: Vec<Move> = board.gen_moves(MoveGenType::Legal).into_iter().collect();
+            let mut moves: Vec<Move> = board.gen_moves().into_iter().collect();
             moves.sort_unstable();
             let moves = moves;
 
