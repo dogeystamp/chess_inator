@@ -296,7 +296,7 @@ impl Move {
                     pos.half_moves = 0;
                 }
 
-                let castle = &mut pos.pl_castle_mut(pc_src.col);
+                let castle = &mut pos.castle[pc_src.col];
                 if matches!(pc_src.pc, Piece::King) {
                     // forfeit castling rights
                     castle.k = false;
@@ -564,10 +564,10 @@ fn is_legal(board: &mut Board, mv: Move) -> bool {
 impl MoveGen for Board {
     fn gen_moves(&mut self, gen_type: MoveGenType) -> impl IntoIterator<Item = Move> {
         let mut ret = Vec::new();
-        let pl = self.pl(self.turn);
+        let pl = self[self.turn];
         macro_rules! squares {
             ($pc: ident) => {
-                pl.board(Piece::$pc).into_iter()
+                pl[Piece::$pc].into_iter()
             };
         }
 
@@ -583,7 +583,7 @@ impl MoveGen for Board {
         for src in squares!(King) {
             move_slider(self, src, &mut ret, SliderDirection::Star, false);
             let (r, c) = src.to_row_col_signed();
-            let rights = self.pl_castle(self.turn);
+            let rights = self.castle[self.turn];
             let castle_sides = [(rights.k, 2, BOARD_WIDTH as isize - 1), (rights.q, -2, 0)];
             for (is_allowed, move_offset, endpoint) in castle_sides {
                 if !is_allowed {
@@ -784,8 +784,8 @@ mod tests {
         use std::collections::hash_set::HashSet;
         use Piece::*;
         for pc in [Rook, Bishop, Knight, Queen, King, Pawn] {
-            let white: HashSet<_> = pos.pl(Color::White).board(pc).into_iter().collect();
-            let black: HashSet<_> = pos.pl(Color::Black).board(pc).into_iter().collect();
+            let white: HashSet<_> = pos[Color::White][pc].into_iter().collect();
+            let black: HashSet<_> = pos[Color::Black][pc].into_iter().collect();
             let intersect = white.intersection(&black).collect::<Vec<_>>();
             assert!(
                 intersect.is_empty(),

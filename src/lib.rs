@@ -14,6 +14,7 @@ Copyright © 2024 dogeystamp <dogeystamp@disroot.org>
 #![deny(rust_2018_idioms)]
 
 use std::fmt::Display;
+use std::ops::{Index, IndexMut};
 use std::str::FromStr;
 
 pub mod eval;
@@ -372,21 +373,9 @@ impl Mailbox {
 ///
 /// Default is all empty.
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
-struct Player {
+pub struct PlayerBoards {
     /// Bitboards for individual pieces. Piece -> locations.
     bit: [Bitboard; N_PIECES],
-}
-
-impl Player {
-    /// Get board (non-mutable) for a specific piece.
-    fn board(&self, pc: Piece) -> &Bitboard {
-        &self.bit[pc as usize]
-    }
-
-    /// Get board (mutable) for a specific piece.
-    fn board_mut(&mut self, pc: Piece) -> &mut Bitboard {
-        &mut self.bit[pc as usize]
-    }
 }
 
 /// Castling rights for one player
@@ -402,9 +391,9 @@ pub struct CastlePlayer {
 #[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
 pub struct CastleRights([CastlePlayer; N_COLORS]);
 
-impl ToString for CastleRights {
+impl Display for CastleRights {
     /// Convert to FEN castling rights format.
-    fn to_string(&self) -> String {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut ret = String::with_capacity(4);
         for (val, ch) in [
             (self.0[Color::White as usize].k, 'K'),
@@ -419,7 +408,7 @@ impl ToString for CastleRights {
         if ret.is_empty() {
             ret.push('-')
         }
-        ret
+        write!(f, "{}", ret)
     }
 }
 
@@ -429,7 +418,7 @@ impl ToString for CastleRights {
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct Board {
     /// Player bitboards
-    players: [Player; N_COLORS],
+    players: [PlayerBoards; N_COLORS],
 
     /// Mailbox (array) board. Location -> piece.
     mail: Mailbox,
@@ -458,26 +447,6 @@ impl Board {
         Board::from_fen(START_POSITION).unwrap()
     }
 
-    /// Get mutable reference to a player.
-    fn pl_mut(&mut self, col: Color) -> &mut Player {
-        &mut self.players[col as usize]
-    }
-
-    /// Get immutable reference to a player.
-    fn pl(&self, col: Color) -> &Player {
-        &self.players[col as usize]
-    }
-
-    /// Get immutable reference to castling rights.
-    pub fn pl_castle(&self, col: Color) -> &CastlePlayer {
-        &self.castle.0[col as usize]
-    }
-
-    /// Get mutable reference to castling rights.
-    fn pl_castle_mut(&mut self, col: Color) -> &mut CastlePlayer {
-        &mut self.castle.0[col as usize]
-    }
-
     /// Get iterator over all squares.
     pub fn squares() -> impl Iterator<Item = Square> {
         (0..N_SQUARES).map(Square::try_from).map(|x| x.unwrap())
@@ -486,8 +455,8 @@ impl Board {
     /// Create a new piece in a location, and pop any existing piece in the destination.
     pub fn set_piece(&mut self, idx: Square, pc: ColPiece) -> Option<ColPiece> {
         let dest_pc = self.del_piece(idx);
-        let pl = self.pl_mut(pc.col);
-        pl.board_mut(pc.into()).on_sq(idx);
+        let pl = &mut self[pc.col];
+        pl[pc.into()].on_sq(idx);
         *self.mail.sq_mut(idx) = Some(pc);
         dest_pc
     }
@@ -503,8 +472,8 @@ impl Board {
     /// Delete the piece in a location, and return ("pop") that piece.
     pub fn del_piece(&mut self, idx: Square) -> Option<ColPiece> {
         if let Some(pc) = *self.mail.sq_mut(idx) {
-            let pl = self.pl_mut(pc.col);
-            pl.board_mut(pc.into()).off_sq(idx);
+            let pl = &mut self[pc.col];
+            pl[pc.into()].off_sq(idx);
             *self.mail.sq_mut(idx) = None;
             Some(pc)
         } else {
@@ -555,7 +524,7 @@ impl Board {
 
     /// Is a given player in check?
     pub fn is_check(&self, pl: Color) -> bool {
-        for src in self.pl(pl).board(Piece::King).into_iter() {
+        for src in self[pl][Piece::King] {
             macro_rules! detect_checker {
                 ($dirs: ident, $pc: pat, $keep_going: expr) => {
                     for dir in $dirs.into_iter() {
@@ -604,6 +573,48 @@ impl Board {
 
     /// Maximum amount of moves in the counter to parse before giving up
     const MAX_MOVES: usize = 9_999;
+}
+
+impl Index<Color> for Board {
+    type Output = PlayerBoards;
+
+    fn index(&self, col: Color) -> &Self::Output {
+        &self.players[col as usize]
+    }
+}
+
+impl IndexMut<Color> for Board {
+    fn index_mut(&mut self, col: Color) -> &mut Self::Output {
+        &mut self.players[col as usize]
+    }
+}
+
+impl Index<Color> for CastleRights {
+    type Output = CastlePlayer;
+
+    fn index(&self, col: Color) -> &Self::Output {
+        &self.0[col as usize]
+    }
+}
+
+impl IndexMut<Color> for CastleRights {
+    fn index_mut(&mut self, col: Color) -> &mut Self::Output {
+        &mut self.0[col as usize]
+    }
+}
+
+impl Index<Piece> for PlayerBoards {
+    type Output = Bitboard;
+
+    fn index(&self, pc: Piece) -> &Self::Output {
+        &self.bit[pc as usize]
+    }
+}
+
+impl IndexMut<Piece> for PlayerBoards {
+    fn index_mut(&mut self, pc: Piece) -> &mut Self::Output {
+        &mut self.bit[pc as usize]
+    }
 }
 
 impl core::fmt::Display for Board {
@@ -693,9 +704,7 @@ mod tests {
         }
 
         let board = Board::from_fen("8/4p3/1q1Q1p2/4p3/1p1r4/8/8/8 w - - 0 1").unwrap();
-        let white_queens = board
-            .pl(Color::White)
-            .board(Piece::Queen)
+        let white_queens = board[Color::White][Piece::Queen]
             .into_iter()
             .collect::<Vec<Square>>();
         assert_eq!(white_queens, vec![Square::from_str("d6").unwrap()])

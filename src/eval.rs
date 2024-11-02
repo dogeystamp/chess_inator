@@ -41,8 +41,8 @@ impl Eval for Board {
         ];
 
         for pc in [Rook, Queen, Pawn, Knight, Bishop, King] {
-            let tally_white = self.pl(Color::White).board(pc).0.count_ones();
-            let tally_black = self.pl(Color::Black).board(pc).0.count_ones();
+            let tally_white = self[Color::White][pc].0.count_ones();
+            let tally_black = self[Color::Black][pc].0.count_ones();
             let tally =
                 EvalInt::try_from(tally_white).unwrap() - EvalInt::try_from(tally_black).unwrap();
 
