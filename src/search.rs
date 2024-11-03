@@ -90,6 +90,24 @@ impl PartialOrd for SearchEval {
     }
 }
 
+/// Configuration for the gametree search.
+#[derive(Clone, Copy, Debug)]
+pub struct SearchConfig {
+    /// Enable alpha-beta pruning.
+    alpha_beta_on: bool,
+    /// Limit search depth (will probably change as quiescence search is implemented)
+    depth: usize,
+}
+
+impl Default for SearchConfig {
+    fn default() -> Self {
+        SearchConfig {
+            alpha_beta_on: true,
+            depth: 5,
+        }
+    }
+}
+
 /// Search the game tree to find the absolute (positive good) move and corresponding eval for the
 /// current player.
 ///
@@ -105,6 +123,7 @@ impl PartialOrd for SearchEval {
 /// The best line (in reverse move order), and its corresponding absolute eval for the current player.
 fn minmax(
     board: &mut Board,
+    config: &SearchConfig,
     depth: usize,
     alpha: Option<EvalInt>,
     beta: Option<EvalInt>,
@@ -139,7 +158,7 @@ fn minmax(
 
     for mv in mvs {
         let anti_mv = mv.make(board);
-        let (continuation, score) = minmax(board, depth - 1, Some(-beta), Some(-alpha));
+        let (continuation, score) = minmax(board, config, depth - 1, Some(-beta), Some(-alpha));
         let abs_score = score.increment();
         if abs_score > abs_best {
             abs_best = abs_score;
@@ -148,7 +167,7 @@ fn minmax(
         }
         alpha = max(alpha, abs_best.into());
         anti_mv.unmake(board);
-        if alpha >= beta {
+        if alpha >= beta && config.alpha_beta_on {
             // alpha-beta prune.
             //
             // Beta represents the best eval that the other player can get in sibling branches
@@ -167,13 +186,64 @@ fn minmax(
 }
 
 /// Find the best line (in reverse order) and its evaluation.
-pub fn best_line(board: &mut Board) -> (Vec<Move>, SearchEval) {
-    let (line, eval) = minmax(board, 5, None, None);
+pub fn best_line(board: &mut Board, config: Option<SearchConfig>) -> (Vec<Move>, SearchEval) {
+    let config = config.unwrap_or_default();
+    let (line, eval) = minmax(board, &config, config.depth, None, None);
     (line, eval)
 }
 
 /// Find the best move.
-pub fn best_move(board: &mut Board) -> Option<Move> {
-    let (line, _eval) = best_line(board);
+pub fn best_move(board: &mut Board, config: Option<SearchConfig>) -> Option<Move> {
+    let (line, _eval) = best_line(board, Some(config.unwrap_or_default()));
     line.last().copied()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::fen::{FromFen, ToFen};
+    use crate::movegen::ToUCIAlgebraic;
+
+    /// Theoretically, alpha-beta pruning should not affect the result of minmax.
+    #[test]
+    fn alpha_beta_same_result() {
+        let test_cases = [
+            // in these cases the engines really likes to sacrifice its pieces for no gain...
+            "r2q1rk1/1bp1pp1p/p2p2p1/1p1P2P1/2n1P3/3Q1P2/PbPBN2P/3RKB1R b K - 5 15",
+            "r1b1k2r/p1qpppbp/1p4pn/2B3N1/1PP1P3/2P5/P4PPP/RN1QR1K1 w kq - 0 14",
+        ];
+        for fen in test_cases {
+            let mut board = Board::from_fen(fen).unwrap();
+            let mv_no_prune = best_move(
+                &mut board,
+                Some(SearchConfig {
+                    alpha_beta_on: false,
+                    depth: 3,
+                }),
+            )
+            .unwrap();
+
+            assert_eq!(board.to_fen(), fen);
+
+            let mv_with_prune = best_move(
+                &mut board,
+                Some(SearchConfig {
+                    alpha_beta_on: true,
+                    depth: 3,
+                }),
+            )
+            .unwrap();
+
+            assert_eq!(board.to_fen(), fen);
+
+            println!(
+                "without ab prune got {}, otherwise {}, fen {}",
+                mv_no_prune.to_uci_algebraic(),
+                mv_with_prune.to_uci_algebraic(),
+                fen
+            );
+
+            assert_eq!(mv_no_prune, mv_with_prune);
+        }
+    }
 }

@@ -12,7 +12,6 @@ Copyright © 2024 dogeystamp <dogeystamp@disroot.org>
 
 //! Main UCI engine binary.
 
-use chess_inator::eval::EvalInt;
 use chess_inator::fen::FromFen;
 use chess_inator::movegen::{FromUCIAlgebraic, Move, ToUCIAlgebraic};
 use chess_inator::search::{best_line, SearchEval};
@@ -88,7 +87,7 @@ fn cmd_position(mut tokens: std::str::SplitWhitespace<'_>) -> Board {
 
 /// Play the game.
 fn cmd_go(mut _tokens: std::str::SplitWhitespace<'_>, board: &mut Board) {
-    let (line, eval) = best_line(board);
+    let (line, eval) = best_line(board, None);
     let chosen = line.last().copied();
     println!(
         "info pv{}",
