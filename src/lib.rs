@@ -469,7 +469,7 @@ impl Board {
         let pl = &mut self[pc.col];
         pl[pc.into()].on_sq(sq);
         *self.mail.sq_mut(sq) = Some(pc);
-        self.eval.add_piece(pc, sq);
+        self.eval.add_piece(&pc, &sq);
         dest_pc
     }
 
@@ -487,7 +487,7 @@ impl Board {
             let pl = &mut self[pc.col];
             pl[pc.into()].off_sq(sq);
             *self.mail.sq_mut(sq) = None;
-            self.eval.del_piece(pc, sq);
+            self.eval.del_piece(&pc, &sq);
             Some(pc)
         } else {
             None

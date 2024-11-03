@@ -52,14 +52,14 @@ pub(crate) mod eval_score {
         /// Add/remove the value of a piece based on the PST.
         ///
         /// Use +1 as sign to add, -1 to delete.
-        fn change_piece(&mut self, pc: ColPiece, sq: Square, sign: i8) {
+        fn change_piece(&mut self, pc: &ColPiece, sq: &Square, sign: i8) {
             assert!(sign == 1 || sign == -1);
             let tables = [
-                (&mut self.midgame, PST_MIDGAME),
-                (&mut self.endgame, PST_ENDGAME),
+                (&mut self.midgame, &PST_MIDGAME),
+                (&mut self.endgame, &PST_ENDGAME),
             ];
             for (phase, pst) in tables {
-                phase.score += pst[pc.pc][pc.col][sq] * EvalInt::from(pc.col.sign() * sign);
+                phase.score += pst[pc.pc][pc.col][*sq] * EvalInt::from(pc.col.sign() * sign);
             }
 
             use crate::Piece::*;
@@ -73,12 +73,12 @@ pub(crate) mod eval_score {
         }
 
         /// Remove the value of a piece on a square.
-        pub fn del_piece(&mut self, pc: ColPiece, sq: Square) {
+        pub fn del_piece(&mut self, pc: &ColPiece, sq: &Square) {
             self.change_piece(pc, sq, -1);
         }
 
         /// Add the value of a piece on a square.
-        pub fn add_piece(&mut self, pc: ColPiece, sq: Square) {
+        pub fn add_piece(&mut self, pc: &ColPiece, sq: &Square) {
             self.change_piece(pc, sq, 1);
         }
     }
