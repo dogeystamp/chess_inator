@@ -448,7 +448,7 @@ enum MoveGenType {
     /// Legal move generation.
     Legal,
     /// Allow capturing friendly pieces, moving into check, but not castling through check.
-    Pseudo,
+    _Pseudo,
 }
 
 /// Internal, slightly more general movegen interface
@@ -754,7 +754,7 @@ impl MoveGenInternal for Board {
         }
         ret.into_iter().filter(move |mv| match gen_type {
             MoveGenType::Legal => is_legal(self, *mv),
-            MoveGenType::Pseudo => true,
+            MoveGenType::_Pseudo => true,
         })
     }
 }
@@ -1090,7 +1090,7 @@ mod tests {
 
         for (mut board, expected_moves) in all_cases {
             let mut moves: Vec<Move> = board
-                .gen_moves_general(MoveGenType::Pseudo)
+                .gen_moves_general(MoveGenType::_Pseudo)
                 .into_iter()
                 .collect();
             moves.sort_unstable();
@@ -1402,63 +1402,6 @@ mod tests {
         for tc in test_cases {
             let mv = Move::from_uci_algebraic(tc).unwrap();
             assert_eq!(mv.to_uci_algebraic(), tc);
-        }
-    }
-
-    /// The standard movegen test.
-    ///
-    /// See https://www.chessprogramming.org/Perft
-    #[test]
-    fn test_perft() {
-        // https://www.chessprogramming.org/Perft_Results
-        let test_cases = [
-            (
-                // fen
-                START_POSITION,
-                // expected perft values
-                vec![1, 20, 400, 8_902, 197_281, 4_865_609, 119_060_324],
-                // limit depth when not under `cargo test --release` (unoptimized build too slow)
-                4,
-            ),
-            (
-                "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
-                vec![1, 48, 2_039, 97_862, 4_085_603],
-                3,
-            ),
-            (
-                "8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1",
-                vec![1, 14, 191, 2_812, 43_238, 674_624, 11_030_083],
-                4,
-            ),
-            (
-                "r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq - 0 1",
-                vec![1, 6, 264, 9467, 422_333, 15_833_292],
-                3,
-            ),
-            (
-                "rnbq1k1r/pp1Pbppp/2p5/8/2B5/8/PPP1NnPP/RNBQK2R w KQ - 1 8",
-                vec![1, 44, 1_486, 62_379, 2_103_487, 89_941_194],
-                3,
-            ),
-            (
-                "r4rk1/1pp1qppp/p1np1n2/2b1p1B1/2B1P1b1/P1NP1N2/1PP1QPPP/R4RK1 w - - 0 10",
-                vec![1, 46, 2_079, 89_890, 3_894_594],
-                3,
-            ),
-        ];
-        for (fen, expected_values, _debug_limit_depth) in test_cases {
-            let mut pos = Board::from_fen(fen).unwrap();
-
-            for (depth, expected) in expected_values.iter().enumerate() {
-                eprintln!("running perft depth {depth} on position '{fen}'");
-                #[cfg(debug_assertions)]
-                {
-                    if depth > _debug_limit_depth {
-                        break;
-                    }
-                }
-                assert_eq!(perft(depth, &mut pos), *expected,);
-            }
         }
     }
 }

@@ -164,6 +164,7 @@ macro_rules! sq_try_from {
             type Error = SquareError;
 
             fn try_from(value: $T) -> Result<Self, Self::Error> {
+                #[allow(irrefutable_let_patterns)]
                 if let Ok(upper_bound) = <$T>::try_from(N_SQUARES) {
                     if (0..upper_bound).contains(&value) {
                         return Ok(Square(value as SquareIdx));
@@ -662,6 +663,7 @@ mod tests {
         for tc in fail_cases {
             macro_rules! try_type {
                 ($T: ty) => {
+                    #[allow(irrefutable_let_patterns)]
                     if let Ok(conv) = <$T>::try_from(tc) {
                         assert!(matches!(
                             Square::try_from(conv),
