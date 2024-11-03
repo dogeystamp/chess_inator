@@ -24,7 +24,6 @@ pub mod search;
 
 use crate::fen::{FromFen, ToFen, START_POSITION};
 use eval::eval_score::EvalScores;
-use eval::PST_MIDGAME;
 
 const BOARD_WIDTH: usize = 8;
 const BOARD_HEIGHT: usize = 8;
@@ -469,7 +468,7 @@ impl Board {
         let pl = &mut self[pc.col];
         pl[pc.into()].on_sq(sq);
         *self.mail.sq_mut(sq) = Some(pc);
-        self.eval.midgame.add_piece(pc, sq, &PST_MIDGAME);
+        self.eval.add_piece(pc, sq);
         dest_pc
     }
 
@@ -487,7 +486,7 @@ impl Board {
             let pl = &mut self[pc.col];
             pl[pc.into()].off_sq(sq);
             *self.mail.sq_mut(sq) = None;
-            self.eval.midgame.del_piece(pc, sq, &PST_MIDGAME);
+            self.eval.del_piece(pc, sq);
             Some(pc)
         } else {
             None

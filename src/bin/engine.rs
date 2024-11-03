@@ -99,10 +99,7 @@ fn cmd_go(mut _tokens: std::str::SplitWhitespace<'_>, board: &mut Board) {
     match eval {
         SearchEval::Checkmate(n) => println!("info score mate {}", n / 2),
         SearchEval::Centipawns(eval) => {
-            println!(
-                "info score cp {}",
-                eval,
-            )
+            println!("info score cp {}", eval,)
         }
     }
     match chosen {

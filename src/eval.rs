@@ -14,6 +14,7 @@ Copyright © 2024 dogeystamp <dogeystamp@disroot.org>
 //! Position evaluation.
 
 use crate::{Board, Color, Piece, Square, N_COLORS, N_PIECES, N_SQUARES};
+use core::cmp::max;
 use core::ops::Index;
 
 /// Signed centipawn type.
@@ -31,7 +32,7 @@ pub trait Eval {
 pub(crate) mod eval_score {
     //! Opaque "score" counters to be used in the board.
 
-    use super::{EvalInt, Pst};
+    use super::{EvalInt, PST_ENDGAME, PST_MIDGAME};
     use crate::{ColPiece, Square};
 
     /// Internal score-keeping for a board.
@@ -43,6 +44,43 @@ pub(crate) mod eval_score {
         pub midgame: EvalScore,
         /// End-game perspective evaluation of this board.
         pub endgame: EvalScore,
+        /// Non-pawn/king piece count, used to determine when the endgame has begun.
+        pub min_maj_pieces: u8,
+    }
+
+    impl EvalScores {
+        /// Add/remove the value of a piece based on the PST.
+        ///
+        /// Use +1 as sign to add, -1 to delete.
+        fn change_piece(&mut self, pc: ColPiece, sq: Square, sign: i8) {
+            assert!(sign == 1 || sign == -1);
+            let tables = [
+                (&mut self.midgame, PST_MIDGAME),
+                (&mut self.endgame, PST_ENDGAME),
+            ];
+            for (phase, pst) in tables {
+                phase.score += pst[pc.pc][pc.col][sq] * EvalInt::from(pc.col.sign() * sign);
+            }
+
+            use crate::Piece::*;
+            if matches!(pc.pc, Rook | Queen | Knight | Bishop) {
+                match sign {
+                    -1 => self.min_maj_pieces -= 1,
+                    1 => self.min_maj_pieces += 1,
+                    _ => panic!(),
+                }
+            }
+        }
+
+        /// Remove the value of a piece on a square.
+        pub fn del_piece(&mut self, pc: ColPiece, sq: Square) {
+            self.change_piece(pc, sq, -1);
+        }
+
+        /// Add the value of a piece on a square.
+        pub fn add_piece(&mut self, pc: ColPiece, sq: Square) {
+            self.change_piece(pc, sq, 1);
+        }
     }
 
     /// Score from a given perspective (e.g. midgame, endgame).
@@ -50,18 +88,6 @@ pub(crate) mod eval_score {
     pub struct EvalScore {
         /// Signed score.
         pub score: EvalInt,
-    }
-
-    impl EvalScore {
-        /// Remove the value of a piece on a square.
-        pub fn del_piece(&mut self, pc: ColPiece, sq: Square, pst: &Pst) {
-            self.score -= pst[pc.pc][pc.col][sq] * EvalInt::from(pc.col.sign());
-        }
-
-        /// Add the value of a piece on a square.
-        pub fn add_piece(&mut self, pc: ColPiece, sq: Square, pst: &Pst) {
-            self.score += pst[pc.pc][pc.col][sq] * EvalInt::from(pc.col.sign());
-        }
     }
 }
 
@@ -237,22 +263,97 @@ pub const PST_MIDGAME: Pst = Pst([
     ], 100),
 ]);
 
-/// Calculate evaluation without incremental updates.
-pub(crate) fn refresh_eval(board: &Board) -> EvalInt {
-    let mut eval: EvalInt = 0;
-    for sq in Board::squares() {
-        if let Some(pc) = board.get_piece(sq) {
-            eval += PST_MIDGAME[pc.pc][pc.col][sq] * EvalInt::from(pc.col.sign());
-        }
-    }
-    eval
-}
+#[rustfmt::skip]
+pub const PST_ENDGAME: Pst = Pst([
+    // rook
+    make_pst([
+        0,   0,   0,   0,   0,   0,   0,   0, // 8
+        0,   0,   0,   0,   0,   0,   0,   0, // 7
+        1,   2,   3,   1,   2,   1,   2,   1, // 6
+        1,   2,   1,   2,   1,   1,   1,   1, // 5
+        1,   1,   2,   1,   1,   1,   2,   1, // 4
+        2,   1,   1,   0,   0,   0,   0,   0, // 3
+        0,   0,   0,   0,   0,   0,   0,   0, // 2
+        0,   0,   0,   0,   0,   0,   0,   0, // 1
+    //  a    b    c    d    e    f    g    h
+    ], 500),
+
+    // bishop
+    make_pst([
+        0,   0,   0,   0,   0,   0,   0,   0, // 8
+        0,   0,   0,   0,   0,   0,   0,   0, // 7
+        0,   0,   0,   0,   0,   0,   0,   0, // 6
+        0,   0,   0,   0,   0,   0,   0,   0, // 5
+        0,   0,   0,   0,   0,   0,   0,   0, // 4
+        0,   0,   0,   0,   0,   0,   0,   0, // 3
+        0,   0,   0,   0,   0,   0,   0,   0, // 2
+        0,   0,   0,   0,   0,   0,   0,   0, // 1
+    //  a    b    c    d    e    f    g    h
+    ], 300),
+
+    // knight
+    make_pst([
+       -5,  -5,  -5,  -5,  -5,  -5,  -5,  -5, // 8
+       -5,   0,   0,   0,   0,   0,   0,  -5, // 7
+       -5,   0,   0,   0,   0,   0,   0,  -5, // 6
+       -5,   0,   0,   0,   0,   0,   0,  -5, // 5
+       -5,   0,   0,   0,   0,   0,   0,  -5, // 4
+       -5,   0,   0,   0,   0,   0,   0,  -5, // 3
+       -5,   0,   0,   0,   0,   0,   0,  -5, // 2
+       -5,  -5,  -5,  -5,  -5,  -5,  -5,  -5, // 1
+    //  a    b    c    d    e    f    g    h
+    ], 300),
+
+    // king
+    make_pst([
+      -50, -50, -50, -50, -50, -50, -50, -50, // 8
+      -50, -10, -10, -10, -10, -10, -10, -50, // 7
+      -50, -10,   0,   0,   0,   0, -10, -50, // 6
+      -50, -10,   0,   4,   4,   0, -10, -50, // 5
+      -50, -10,   0,   4,   4,   0, -10, -50, // 4
+      -50, -10,   0,   0,   0,   0, -10, -50, // 3
+      -50, -10, -10, -10, -10, -10, -10, -50, // 2
+      -50, -50, -50, -50, -50, -50, -50, -50, // 1
+    //  a    b    c    d    e    f    g    h
+    ], 20_000),
+
+    // queen
+    make_pst([
+        0,   0,   0,   0,   0,   0,   0,   0, // 8
+        0,   0,   0,   0,   0,   0,   0,   0, // 7
+        0,   0,   0,   0,   0,   0,   0,   0, // 6
+        0,   0,   0,   0,   0,   0,   0,   0, // 5
+        0,   0,   0,   0,   0,   0,   0,   0, // 4
+        0,   0,   0,   0,   0,   0,   0,   0, // 3
+        0,   0,   0,   0,   0,   0,   0,   0, // 2
+        0,   0,   0,   0,   0,   0,   0,   0, // 1
+    //  a    b    c    d    e    f    g    h
+    ], 900),
+
+    // pawn
+    make_pst([
+       10,  10,  10,  10,  10,  10,  10,  10, // 8
+       39,  39,  39,  39,  39,  39,  39,  39, // 7
+       38,  38,  38,  38,  38,  38,  38,  38, // 6
+       37,  37,  37,  38,  38,  37,  37,  37, // 5
+       36,  36,  36,  36,  36,  36,  36,  36, // 4
+       32,  32,  32,  34,  34,  30,  32,  30, // 3
+        0,   0,   0,   0,   0,   0,   0,   0, // 2
+        0,   0,   0,   0,   0,   0,   0,   0, // 1
+    //  a    b    c    d    e    f    g    h
+    ], 100),
+]);
 
 impl Eval for Board {
     fn eval(&self) -> EvalInt {
-        let score_incremental = self.eval.midgame.score;
-        debug_assert_eq!(refresh_eval(self), score_incremental);
-        self.eval.midgame.score
+        // we'll define endgame as the moment when there are 7 non pawn/king pieces left on the
+        // board in total.
+        //
+        // `phase` will range from 7 (game start) to 0 (endgame).
+        let phase = i32::from(self.eval.min_maj_pieces.saturating_sub(7));
+        let eval = i32::from(self.eval.midgame.score) * phase / 7
+            + i32::from(self.eval.endgame.score) * max(7 - phase, 0) / 7;
+        eval.try_into().unwrap()
     }
 }
 
@@ -269,7 +370,7 @@ mod tests {
         let board2 = Board::from_fen("rnbqkbnr/pppppppp/8/8/8/8/8/4K3 w kq - 0 1").unwrap();
         let eval2 = board2.eval();
 
-        assert!(eval1 > 0, "got eval {eval1}");
-        assert!(eval2 < 0, "got eval {eval2}");
+        assert!(eval1 > 0, "got eval {eval1} ({:?})", board1.eval);
+        assert!(eval2 < 0, "got eval {eval2} ({:?})", board2.eval);
     }
 }
