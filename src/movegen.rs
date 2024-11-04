@@ -21,7 +21,7 @@ use crate::{
 
 /// Piece enum specifically for promotions.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-enum PromotePiece {
+pub enum PromotePiece {
     Rook,
     Bishop,
     Knight,
@@ -45,7 +45,7 @@ impl From<PromotePiece> for char {
     }
 }
 
-struct NonPromotePiece;
+pub struct NonPromotePiece;
 
 impl TryFrom<Piece> for PromotePiece {
     type Error = NonPromotePiece;
@@ -84,7 +84,7 @@ pub struct AntiMove {
     dest: Square,
     src: Square,
     /// Captured piece, always assumed to be of enemy color.
-    cap: Option<Piece>,
+    pub (crate) cap: Option<Piece>,
     move_type: AntiMoveType,
     /// Half-move counter prior to this move
     half_moves: usize,
@@ -150,7 +150,7 @@ impl AntiMove {
 }
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Debug, Clone, Copy)]
-enum MoveType {
+pub enum MoveType {
     /// Pawn promotes to another piece.
     Promotion(PromotePiece),
     /// Capture, or push move. Includes castling and en-passant too.
@@ -161,9 +161,9 @@ enum MoveType {
 /// No checking is done when constructing this.
 #[derive(PartialEq, Eq, PartialOrd, Ord, Debug, Clone, Copy)]
 pub struct Move {
-    src: Square,
-    dest: Square,
-    move_type: MoveType,
+    pub src: Square,
+    pub dest: Square,
+    pub move_type: MoveType,
 }
 
 impl Move {

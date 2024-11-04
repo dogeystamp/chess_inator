@@ -14,8 +14,8 @@ Copyright © 2024 dogeystamp <dogeystamp@disroot.org>
 //! Game-tree search.
 
 use crate::eval::{Eval, EvalInt};
-use crate::movegen::{Move, MoveGen};
-use crate::Board;
+use crate::movegen::{Move, MoveGen, ToUCIAlgebraic};
+use crate::{Board, Piece};
 use std::cmp::max;
 
 // min can't be represented as positive
@@ -95,8 +95,10 @@ impl PartialOrd for SearchEval {
 pub struct SearchConfig {
     /// Enable alpha-beta pruning.
     alpha_beta_on: bool,
-    /// Limit search depth (will probably change as quiescence search is implemented)
+    /// Limit regular search depth
     depth: usize,
+    /// Limit quiescence search depth (extra depth on top of regular depth)
+    quiesce_depth: usize,
 }
 
 impl Default for SearchConfig {
@@ -104,8 +106,86 @@ impl Default for SearchConfig {
         SearchConfig {
             alpha_beta_on: true,
             depth: 5,
+            quiesce_depth: 2,
         }
     }
+}
+
+/// If a move is a capture, return which piece is capturing what.
+fn move_get_capture(board: &mut Board, mv: &Move) -> Option<(Piece, Piece)> {
+    // TODO: en passant
+    board
+        .get_piece(mv.dest)
+        .map(|cap_pc| (board.get_piece(mv.src).unwrap().into(), cap_pc.into()))
+}
+
+/// Least valuable victim, most valuable attacker heuristic for captures.
+fn lvv_mva_eval(src_pc: Piece, cap_pc: Piece) -> EvalInt {
+    let pc_values = [500, 300, 300, 20000, 900, 100];
+    pc_values[cap_pc as usize] - pc_values[src_pc as usize]
+}
+
+/// Assign a priority to a move based on how promising it is.
+fn move_priority(board: &mut Board, mv: &Move) -> EvalInt {
+    // move eval
+    let mut eval: EvalInt = 0;
+    if let Some((src_pc, cap_pc)) = move_get_capture(board, mv) {
+        // least valuable victim, most valuable attacker
+        eval += lvv_mva_eval(src_pc, cap_pc)
+    }
+
+    eval
+}
+
+/// Search past the "horizon" caused by limiting the minmax depth.
+///
+/// We'll only search captures.
+///
+/// # Returns
+///
+/// Absolute (good for current side is positive) evaluation of the position.
+fn quiesce(
+    board: &mut Board,
+    config: &SearchConfig,
+    depth: usize,
+    mut alpha: EvalInt,
+    beta: EvalInt,
+) -> EvalInt {
+    if depth == 0 {
+        let eval = board.eval();
+        return eval * EvalInt::from(board.turn.sign());
+    }
+
+    let mut abs_best = None;
+
+    // sort moves by decreasing priority
+    let mut mvs: Vec<_> = board
+        .gen_moves()
+        .into_iter()
+        .collect::<Vec<_>>()
+        .into_iter()
+        .map(|mv| (move_priority(board, &mv), mv))
+        .collect();
+
+    mvs.sort_unstable_by_key(|mv| -mv.0);
+    for (_priority, mv) in mvs {
+        if move_get_capture(board, &mv).is_none() {
+            continue;
+        }
+        let anti_mv = mv.make(board);
+        let abs_score = -quiesce(board, config, depth - 1, -beta, -alpha);
+        anti_mv.unmake(board);
+        if let Some(abs_best_score) = abs_best {
+            abs_best = Some(max(abs_best_score, abs_score));
+        } else {
+            abs_best = Some(abs_score);
+        }
+        alpha = max(alpha, abs_best.unwrap());
+        if alpha >= beta && config.alpha_beta_on {
+            break;
+        }
+    }
+    abs_best.unwrap_or(board.eval() * EvalInt::from(board.turn.sign()))
 }
 
 /// Search the game tree to find the absolute (positive good) move and corresponding eval for the
@@ -134,14 +214,19 @@ fn minmax(
     let beta = beta.unwrap_or(EVAL_BEST);
 
     if depth == 0 {
-        let eval = board.eval();
-        return (
-            Vec::new(),
-            SearchEval::Centipawns(eval * EvalInt::from(board.turn.sign())),
-        );
+        let eval = quiesce(board, config, config.quiesce_depth, alpha, beta);
+        return (Vec::new(), SearchEval::Centipawns(eval));
     }
 
-    let mvs: Vec<_> = board.gen_moves().into_iter().collect();
+    // sort moves by decreasing priority
+    let mut mvs: Vec<_> = board
+        .gen_moves()
+        .into_iter()
+        .collect::<Vec<_>>()
+        .into_iter()
+        .map(|mv| (move_priority(board, &mv), mv))
+        .collect();
+    mvs.sort_unstable_by_key(|mv| -mv.0);
 
     let mut abs_best = SearchEval::Centipawns(EVAL_WORST);
     let mut best_move: Option<Move> = None;
@@ -156,7 +241,7 @@ fn minmax(
         }
     }
 
-    for mv in mvs {
+    for (_priority, mv) in mvs {
         let anti_mv = mv.make(board);
         let (continuation, score) = minmax(board, config, depth - 1, Some(-beta), Some(-alpha));
         let abs_score = score.increment();
@@ -219,6 +304,7 @@ mod tests {
                 Some(SearchConfig {
                     alpha_beta_on: false,
                     depth: 3,
+                    quiesce_depth: Default::default(),
                 }),
             )
             .unwrap();
@@ -230,6 +316,7 @@ mod tests {
                 Some(SearchConfig {
                     alpha_beta_on: true,
                     depth: 3,
+                    quiesce_depth: Default::default(),
                 }),
             )
             .unwrap();
