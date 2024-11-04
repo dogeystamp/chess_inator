@@ -205,14 +205,14 @@ macro_rules! from_row_col_generic {
 }
 
 impl Square {
-    fn from_row_col(r: usize, c: usize) -> Result<Self, SquareError> {
+    pub fn from_row_col(r: usize, c: usize) -> Result<Self, SquareError> {
         //! Get index of square based on row and column.
         from_row_col_generic!(usize, r, c)
     }
-    fn from_row_col_signed(r: isize, c: isize) -> Result<Self, SquareError> {
+    pub fn from_row_col_signed(r: isize, c: isize) -> Result<Self, SquareError> {
         from_row_col_generic!(isize, r, c)
     }
-    fn to_row_col(self) -> (usize, usize) {
+    pub fn to_row_col(self) -> (usize, usize) {
         //! Get row, column from index
         let div = usize::from(self.0) / BOARD_WIDTH;
         let rem = usize::from(self.0) % BOARD_WIDTH;
@@ -220,18 +220,25 @@ impl Square {
         debug_assert!(rem <= 7);
         (div, rem)
     }
-    fn to_row_col_signed(self) -> (isize, isize) {
+    pub fn to_row_col_signed(self) -> (isize, isize) {
         //! Get row, column (signed) from index
         let (r, c) = self.to_row_col();
         (r.try_into().unwrap(), c.try_into().unwrap())
     }
 
     /// Vertically mirror a square.
-    fn mirror_vert(&self) -> Self {
+    pub fn mirror_vert(&self) -> Self {
         let (r, c) = self.to_row_col();
         let (nr, nc) = (BOARD_HEIGHT - 1 - r, c);
         Square::from_row_col(nr, nc)
             .unwrap_or_else(|e| panic!("mirrored square should be valid: nr {nr} nc {nc}: {e:?}"))
+    }
+
+    /// Manhattan (grid-based) distance with another Square.
+    pub fn manhattan(&self, other: Self) -> usize {
+        let (r1, c1) = self.to_row_col();
+        let (r2, c2) = other.to_row_col();
+        r1.abs_diff(r2) + c1.abs_diff(c2)
     }
 }
 
@@ -759,6 +766,28 @@ mod tests {
             let tc = Board::from_fen(tc).unwrap();
             let expect = Board::from_fen(expect).unwrap();
             assert_eq!(tc.flip_colors(), expect);
+        }
+    }
+
+    #[test]
+    fn manhattan_distance() {
+        let test_cases = [
+            ("a3", "a3", 0),
+            ("a3", "a4", 1),
+            ("a3", "b3", 1),
+            ("a3", "b4", 2),
+            ("a1", "b8", 8),
+        ];
+
+        for (sq_str1, sq_str2, expected) in test_cases {
+            let sq1 = Square::from_str(sq_str1).unwrap();
+            let sq2 = Square::from_str(sq_str2).unwrap();
+            let res = sq1.manhattan(sq2);
+            assert_eq!(
+                res, expected,
+                "failed {sq_str1} and {sq_str2}: got manhattan {}, expected {}",
+                res, expected
+            );
         }
     }
 }

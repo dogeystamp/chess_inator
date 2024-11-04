@@ -14,7 +14,7 @@ Copyright © 2024 dogeystamp <dogeystamp@disroot.org>
 //! Position evaluation.
 
 use crate::{Board, Color, Piece, Square, N_COLORS, N_PIECES, N_SQUARES};
-use core::cmp::max;
+use core::cmp::{max, min};
 use core::ops::Index;
 
 /// Signed centipawn type.
@@ -306,14 +306,14 @@ pub const PST_ENDGAME: Pst = Pst([
 
     // king
     make_pst([
-      -50, -50, -50, -50, -50, -50, -50, -50, // 8
-      -50, -10, -10, -10, -10, -10, -10, -50, // 7
-      -50, -10,   0,   0,   0,   0, -10, -50, // 6
-      -50, -10,   0,   4,   4,   0, -10, -50, // 5
-      -50, -10,   0,   4,   4,   0, -10, -50, // 4
-      -50, -10,   0,   0,   0,   0, -10, -50, // 3
-      -50, -10, -10, -10, -10, -10, -10, -50, // 2
-      -50, -50, -50, -50, -50, -50, -50, -50, // 1
+     -100,-100, -90, -70, -70, -90,-100,-100, // 8
+     -100, -20, -15, -13, -13, -15, -20,-100, // 7
+      -90, -15,  -5,  -5,  -5,  -5, -15, -90, // 6
+      -70, -13,  -5,   4,   4,  -5, -13, -70, // 5
+      -70, -13,  -5,   4,   4,  -5, -13, -70, // 4
+      -90, -15,  -5,  -5,  -5,  -5, -15, -90, // 3
+     -100, -20, -15, -13, -13, -15, -20,-100, // 2
+     -100,-100, -90, -70, -70, -90,-100,-100, // 1
     //  a    b    c    d    e    f    g    h
     ], 20_000),
 
@@ -344,16 +344,57 @@ pub const PST_ENDGAME: Pst = Pst([
     ], 100),
 ]);
 
+/// Centipawn, signed, eval metrics.
+pub struct EvalMetrics {
+    pub pst_eval: i32,
+    /// Manhattan distance between kings.
+    pub king_distance: usize,
+    pub king_distance_eval: i32,
+    pub total_eval: i32,
+    /// game phase, from 14 (start) to 0 (end endgame).
+    pub phase: i32,
+}
+
+pub fn eval_metrics(board: &Board) -> EvalMetrics {
+    // we'll define endgame as the moment when there are 7 non pawn/king pieces left on the
+    // board in total.
+    //
+    // `phase` will range from 14 (game start) to 7 (endgame) to 0 (end end game).
+    let phase = i32::from(board.eval.min_maj_pieces);
+
+    // piece square tables
+    let pst_eval = i32::from(board.eval.midgame.score) * max(7, phase - 7) / 7
+        + i32::from(board.eval.endgame.score) * min(14 - phase, 7) / 7;
+
+    // Signed factor of the color with the material advantage.
+    let advantage = pst_eval / 10;
+
+    let kings1 = board[board.turn][Piece::King].into_iter();
+    let kings2 = board[board.turn.flip()][Piece::King].into_iter();
+    let king_distance = kings1
+        .zip(kings2)
+        .next()
+        .map_or(0, |(k1, k2)| k1.manhattan(k2));
+
+    // attempt to minimize king distance for checkmates
+    let king_distance_eval = -advantage * i32::try_from(king_distance).unwrap() * max(7 - phase, 0) / 100;
+
+    let eval = pst_eval + king_distance_eval;
+
+    EvalMetrics {
+        pst_eval,
+        king_distance,
+        king_distance_eval,
+        total_eval: eval,
+        phase,
+    }
+}
+
 impl Eval for Board {
     fn eval(&self) -> EvalInt {
-        // we'll define endgame as the moment when there are 7 non pawn/king pieces left on the
-        // board in total.
-        //
-        // `phase` will range from 7 (game start) to 0 (endgame).
-        let phase = i32::from(self.eval.min_maj_pieces.saturating_sub(7));
-        let eval = i32::from(self.eval.midgame.score) * phase / 7
-            + i32::from(self.eval.endgame.score) * max(7 - phase, 0) / 7;
-        eval.try_into().unwrap()
+        let res = eval_metrics(self);
+
+        res.total_eval.try_into().unwrap()
     }
 }
 

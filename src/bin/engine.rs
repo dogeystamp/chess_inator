@@ -15,6 +15,7 @@ Copyright © 2024 dogeystamp <dogeystamp@disroot.org>
 use chess_inator::fen::FromFen;
 use chess_inator::movegen::{FromUCIAlgebraic, Move, ToUCIAlgebraic};
 use chess_inator::search::{best_line, SearchEval};
+use chess_inator::eval::{eval_metrics};
 use chess_inator::Board;
 use std::io;
 
@@ -108,6 +109,12 @@ fn cmd_go(mut _tokens: std::str::SplitWhitespace<'_>, board: &mut Board) {
     }
 }
 
+/// Print static evaluation of the position.
+fn cmd_eval(mut _tokens: std::str::SplitWhitespace<'_>, board: &mut Board) {
+    let res = eval_metrics(board);
+    println!("STATIC EVAL (negative black, positive white):\n- pst: {}\n- king distance: {} ({} distance)\n- phase: {}\n- total: {}", res.pst_eval, res.king_distance_eval, res.king_distance, res.phase, res.total_eval);
+}
+
 fn main() {
     let stdin = io::stdin();
 
@@ -136,6 +143,10 @@ fn main() {
                 }
                 "go" => {
                     cmd_go(tokens, &mut board);
+                }
+                // non-standard command.
+                "eval" => {
+                    cmd_eval(tokens, &mut board);
                 }
                 _ => ignore!(),
             }
