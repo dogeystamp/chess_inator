@@ -8,6 +8,7 @@ Features:
 - Piece-square tables
     - Tapered midgame-endgame evaluation
 - UCI compatibility
+- Iterative deepening
 
 ## instructions
 

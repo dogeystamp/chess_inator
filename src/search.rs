@@ -17,6 +17,7 @@ use crate::eval::{Eval, EvalInt};
 use crate::movegen::{Move, MoveGen, ToUCIAlgebraic};
 use crate::{Board, Piece};
 use std::cmp::max;
+use std::sync::mpsc;
 
 // min can't be represented as positive
 const EVAL_WORST: EvalInt = -(EvalInt::MAX);
@@ -103,7 +104,7 @@ impl Default for SearchConfig {
     fn default() -> Self {
         SearchConfig {
             alpha_beta_on: true,
-            depth: 5,
+            depth: 10,
         }
     }
 }
@@ -216,16 +217,54 @@ fn minmax(
     (best_continuation, abs_best)
 }
 
+/// Messages from the interface to the search thread.
+pub enum InterfaceMsg {
+    Stop,
+}
+
+type InterfaceRx = mpsc::Receiver<InterfaceMsg>;
+
+/// Iteratively deepen search until it is stopped.
+fn iter_deep(
+    board: &mut Board,
+    config: &SearchConfig,
+    interface: Option<InterfaceRx>,
+) -> (Vec<Move>, SearchEval) {
+    for depth in 1..=config.depth {
+        let (line, eval) = minmax(board, config, depth, None, None);
+        if let Some(ref rx) = interface {
+            match rx.try_recv() {
+                Ok(msg) => match msg {
+                    InterfaceMsg::Stop => return (line, eval),
+                },
+                Err(e) => match e {
+                    mpsc::TryRecvError::Empty => {}
+                    mpsc::TryRecvError::Disconnected => panic!("interface thread stopped"),
+                },
+            }
+        }
+    }
+    panic!("iterative deepening did not search at all")
+}
+
 /// Find the best line (in reverse order) and its evaluation.
-pub fn best_line(board: &mut Board, config: Option<SearchConfig>) -> (Vec<Move>, SearchEval) {
+pub fn best_line(
+    board: &mut Board,
+    config: Option<SearchConfig>,
+    interface: Option<InterfaceRx>,
+) -> (Vec<Move>, SearchEval) {
     let config = config.unwrap_or_default();
-    let (line, eval) = minmax(board, &config, config.depth, None, None);
+    let (line, eval) = iter_deep(board, &config, interface);
     (line, eval)
 }
 
 /// Find the best move.
-pub fn best_move(board: &mut Board, config: Option<SearchConfig>) -> Option<Move> {
-    let (line, _eval) = best_line(board, Some(config.unwrap_or_default()));
+pub fn best_move(
+    board: &mut Board,
+    config: Option<SearchConfig>,
+    interface: Option<InterfaceRx>,
+) -> Option<Move> {
+    let (line, _eval) = best_line(board, Some(config.unwrap_or_default()), interface);
     line.last().copied()
 }
 
@@ -250,8 +289,8 @@ mod tests {
                 Some(SearchConfig {
                     alpha_beta_on: false,
                     depth: 3,
-                    quiesce_depth: Default::default(),
                 }),
+                None,
             )
             .unwrap();
 
@@ -262,8 +301,8 @@ mod tests {
                 Some(SearchConfig {
                     alpha_beta_on: true,
                     depth: 3,
-                    quiesce_depth: Default::default(),
                 }),
+                None,
             )
             .unwrap();
 

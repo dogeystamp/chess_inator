@@ -12,12 +12,15 @@ Copyright © 2024 dogeystamp <dogeystamp@disroot.org>
 
 //! Main UCI engine binary.
 
+use chess_inator::eval::eval_metrics;
 use chess_inator::fen::FromFen;
 use chess_inator::movegen::{FromUCIAlgebraic, Move, ToUCIAlgebraic};
-use chess_inator::search::{best_line, SearchEval};
-use chess_inator::eval::{eval_metrics};
+use chess_inator::search::{best_line, InterfaceMsg, SearchEval};
 use chess_inator::Board;
 use std::io;
+use std::sync::mpsc::channel;
+use std::thread;
+use std::time::{Duration, Instant};
 
 /// UCI protocol says to ignore any unknown words.
 ///
@@ -88,7 +91,18 @@ fn cmd_position(mut tokens: std::str::SplitWhitespace<'_>) -> Board {
 
 /// Play the game.
 fn cmd_go(mut _tokens: std::str::SplitWhitespace<'_>, board: &mut Board) {
-    let (line, eval) = best_line(board, None);
+    // interface-to-engine
+    let (tx1, rx) = channel();
+    let tx2 = tx1.clone();
+
+    // timeout
+    thread::spawn(move || {
+        thread::sleep(Duration::from_millis(1000));
+        let _ = tx2.send(InterfaceMsg::Stop);
+    });
+
+    let (line, eval) = best_line(board, None, Some(rx));
+
     let chosen = line.last().copied();
     println!(
         "info pv{}",
