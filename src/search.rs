@@ -97,8 +97,6 @@ pub struct SearchConfig {
     alpha_beta_on: bool,
     /// Limit regular search depth
     depth: usize,
-    /// Limit quiescence search depth (extra depth on top of regular depth)
-    quiesce_depth: usize,
 }
 
 impl Default for SearchConfig {
@@ -106,7 +104,6 @@ impl Default for SearchConfig {
         SearchConfig {
             alpha_beta_on: true,
             depth: 5,
-            quiesce_depth: 2,
         }
     }
 }
@@ -137,57 +134,6 @@ fn move_priority(board: &mut Board, mv: &Move) -> EvalInt {
     eval
 }
 
-/// Search past the "horizon" caused by limiting the minmax depth.
-///
-/// We'll only search captures.
-///
-/// # Returns
-///
-/// Absolute (good for current side is positive) evaluation of the position.
-fn quiesce(
-    board: &mut Board,
-    config: &SearchConfig,
-    depth: usize,
-    mut alpha: EvalInt,
-    beta: EvalInt,
-) -> EvalInt {
-    if depth == 0 {
-        let eval = board.eval();
-        return eval * EvalInt::from(board.turn.sign());
-    }
-
-    let mut abs_best = None;
-
-    // sort moves by decreasing priority
-    let mut mvs: Vec<_> = board
-        .gen_moves()
-        .into_iter()
-        .collect::<Vec<_>>()
-        .into_iter()
-        .map(|mv| (move_priority(board, &mv), mv))
-        .collect();
-
-    mvs.sort_unstable_by_key(|mv| -mv.0);
-    for (_priority, mv) in mvs {
-        if move_get_capture(board, &mv).is_none() {
-            continue;
-        }
-        let anti_mv = mv.make(board);
-        let abs_score = -quiesce(board, config, depth - 1, -beta, -alpha);
-        anti_mv.unmake(board);
-        if let Some(abs_best_score) = abs_best {
-            abs_best = Some(max(abs_best_score, abs_score));
-        } else {
-            abs_best = Some(abs_score);
-        }
-        alpha = max(alpha, abs_best.unwrap());
-        if alpha >= beta && config.alpha_beta_on {
-            break;
-        }
-    }
-    abs_best.unwrap_or(board.eval() * EvalInt::from(board.turn.sign()))
-}
-
 /// Search the game tree to find the absolute (positive good) move and corresponding eval for the
 /// current player.
 ///
@@ -214,7 +160,7 @@ fn minmax(
     let beta = beta.unwrap_or(EVAL_BEST);
 
     if depth == 0 {
-        let eval = quiesce(board, config, config.quiesce_depth, alpha, beta);
+        let eval = board.eval() * EvalInt::from(board.turn.sign());
         return (Vec::new(), SearchEval::Centipawns(eval));
     }
 
