@@ -13,6 +13,7 @@ Copyright © 2024 dogeystamp <dogeystamp@disroot.org>
 
 //! Move generation.
 
+use crate::hash::Zobrist;
 use crate::fen::ToFen;
 use crate::{
     Board, CastleRights, ColPiece, Color, Piece, Square, SquareError, BOARD_HEIGHT, BOARD_WIDTH,
@@ -97,6 +98,8 @@ pub struct AntiMove {
 impl AntiMove {
     /// Undo the move.
     pub fn unmake(self, pos: &mut Board) {
+        Zobrist::toggle_board_info(pos);
+
         pos.move_piece(self.dest, self.src);
         pos.half_moves = self.half_moves;
         pos.castle = self.castle;
@@ -146,6 +149,8 @@ impl AntiMove {
                 pos.move_piece(rook_dest, rook_src);
             }
         }
+
+        Zobrist::toggle_board_info(pos);
     }
 }
 
@@ -178,6 +183,9 @@ impl Move {
             castle: pos.castle,
             ep_square: pos.ep_square,
         };
+
+        // undo hashes (we will update them at the end of this function)
+        Zobrist::toggle_board_info(pos);
 
         // reset en passant
         let ep_square = pos.ep_square;
@@ -359,6 +367,9 @@ impl Move {
         };
 
         pos.turn = pos.turn.flip();
+
+        // redo hashes (we undid them at the start of this function)
+        Zobrist::toggle_board_info(pos);
 
         anti_move
     }

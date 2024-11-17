@@ -12,6 +12,7 @@ Copyright © 2024 dogeystamp <dogeystamp@disroot.org>
 */
 
 use crate::{Board, ColPiece, Color, Square, SquareIdx, BOARD_HEIGHT, BOARD_WIDTH};
+use crate::hash::Zobrist;
 
 pub const START_POSITION: &str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 
@@ -239,6 +240,7 @@ impl FromFen for Board {
         // parser is always ready to receive another full move digit,
         // so there is no real "stop" state
         if matches!(parser_state, FenState::FullMove) {
+            Zobrist::toggle_board_info(&mut pos);
             Ok(pos)
         } else {
             Err(FenError::MissingFields)

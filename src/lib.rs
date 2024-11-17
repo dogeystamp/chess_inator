@@ -19,10 +19,13 @@ use std::str::FromStr;
 
 pub mod eval;
 pub mod fen;
+mod hash;
 pub mod movegen;
+mod random;
 pub mod search;
 
 use crate::fen::{FromFen, ToFen, START_POSITION};
+use crate::hash::Zobrist;
 use eval::eval_score::EvalScores;
 
 const BOARD_WIDTH: usize = 8;
@@ -457,6 +460,9 @@ pub struct Board {
 
     /// Counters for evaluation.
     eval: EvalScores,
+
+    /// Hash state to incrementally update.
+    zobrist: Zobrist,
 }
 
 impl Board {
@@ -477,6 +483,7 @@ impl Board {
         pl[pc.into()].on_sq(sq);
         *self.mail.sq_mut(sq) = Some(pc);
         self.eval.add_piece(&pc, &sq);
+        self.zobrist.toggle_pc(&pc, &sq);
         dest_pc
     }
 
@@ -495,6 +502,7 @@ impl Board {
             pl[pc.into()].off_sq(sq);
             *self.mail.sq_mut(sq) = None;
             self.eval.del_piece(&pc, &sq);
+            self.zobrist.toggle_pc(&pc, &sq);
             Some(pc)
         } else {
             None
@@ -529,9 +537,11 @@ impl Board {
             ep_square: self.ep_square.map(|sq| sq.mirror_vert()),
             castle: CastleRights(self.castle.0),
             eval: Default::default(),
+            zobrist: Zobrist::default(),
         };
 
         new_board.castle.0.reverse();
+        Zobrist::toggle_board_info(&mut new_board);
 
         for sq in Board::squares() {
             let opt_pc = self.get_piece(sq.mirror_vert()).map(|pc| ColPiece {
