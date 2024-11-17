@@ -20,7 +20,7 @@ use chess_inator::Board;
 use std::io;
 use std::sync::mpsc::channel;
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 /// UCI protocol says to ignore any unknown words.
 ///

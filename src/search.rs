@@ -14,7 +14,7 @@ Copyright © 2024 dogeystamp <dogeystamp@disroot.org>
 //! Game-tree search.
 
 use crate::eval::{Eval, EvalInt};
-use crate::movegen::{Move, MoveGen, ToUCIAlgebraic};
+use crate::movegen::{Move, MoveGen};
 use crate::{Board, Piece};
 use std::cmp::max;
 use std::sync::mpsc;
