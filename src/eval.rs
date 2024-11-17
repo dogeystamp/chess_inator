@@ -377,7 +377,8 @@ pub fn eval_metrics(board: &Board) -> EvalMetrics {
         .map_or(0, |(k1, k2)| k1.manhattan(k2));
 
     // attempt to minimize king distance for checkmates
-    let king_distance_eval = -advantage * i32::try_from(king_distance).unwrap() * max(7 - phase, 0) / 100;
+    let king_distance_eval =
+        -advantage * i32::try_from(king_distance).unwrap() * max(7 - phase, 0) / 100;
 
     let eval = pst_eval + king_distance_eval;
 

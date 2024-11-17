@@ -13,8 +13,8 @@ Copyright © 2024 dogeystamp <dogeystamp@disroot.org>
 
 //! Move generation.
 
-use crate::hash::Zobrist;
 use crate::fen::ToFen;
+use crate::hash::Zobrist;
 use crate::{
     Board, CastleRights, ColPiece, Color, Piece, Square, SquareError, BOARD_HEIGHT, BOARD_WIDTH,
     N_SQUARES,
@@ -85,7 +85,7 @@ pub struct AntiMove {
     dest: Square,
     src: Square,
     /// Captured piece, always assumed to be of enemy color.
-    pub (crate) cap: Option<Piece>,
+    pub(crate) cap: Option<Piece>,
     move_type: AntiMoveType,
     /// Half-move counter prior to this move
     half_moves: usize,

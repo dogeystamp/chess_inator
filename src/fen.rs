@@ -11,8 +11,8 @@ You should have received a copy of the GNU General Public License along with che
 Copyright © 2024 dogeystamp <dogeystamp@disroot.org>
 */
 
-use crate::{Board, ColPiece, Color, Square, SquareIdx, BOARD_HEIGHT, BOARD_WIDTH};
 use crate::hash::Zobrist;
+use crate::{Board, ColPiece, Color, Square, SquareIdx, BOARD_HEIGHT, BOARD_WIDTH};
 
 pub const START_POSITION: &str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 

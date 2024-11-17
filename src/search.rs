@@ -243,7 +243,7 @@ fn iter_deep(
                 },
             }
         } else if depth == config.depth - 1 {
-            return (line, eval)
+            return (line, eval);
         }
     }
     panic!("iterative deepening did not search at all")
