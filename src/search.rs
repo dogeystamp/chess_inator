@@ -242,6 +242,8 @@ fn iter_deep(
                     mpsc::TryRecvError::Disconnected => panic!("interface thread stopped"),
                 },
             }
+        } else if depth == config.depth - 1 {
+            return (line, eval)
         }
     }
     panic!("iterative deepening did not search at all")
@@ -278,7 +280,6 @@ mod tests {
     #[test]
     fn alpha_beta_same_result() {
         let test_cases = [
-            // in these cases the engines really likes to sacrifice its pieces for no gain...
             "r2q1rk1/1bp1pp1p/p2p2p1/1p1P2P1/2n1P3/3Q1P2/PbPBN2P/3RKB1R b K - 5 15",
             "r1b1k2r/p1qpppbp/1p4pn/2B3N1/1PP1P3/2P5/P4PPP/RN1QR1K1 w kq - 0 14",
         ];
