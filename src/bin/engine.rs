@@ -15,7 +15,7 @@ Copyright © 2024 dogeystamp <dogeystamp@disroot.org>
 use chess_inator::eval::eval_metrics;
 use chess_inator::fen::FromFen;
 use chess_inator::movegen::{FromUCIAlgebraic, Move, ToUCIAlgebraic};
-use chess_inator::search::{best_line, InterfaceMsg, SearchEval};
+use chess_inator::search::{best_line, InterfaceMsg, SearchEval, TranspositionTable};
 use chess_inator::Board;
 use std::io;
 use std::sync::mpsc::channel;
@@ -90,7 +90,7 @@ fn cmd_position(mut tokens: std::str::SplitWhitespace<'_>) -> Board {
 }
 
 /// Play the game.
-fn cmd_go(mut _tokens: std::str::SplitWhitespace<'_>, board: &mut Board) {
+fn cmd_go(mut _tokens: std::str::SplitWhitespace<'_>, board: &mut Board, cache: &mut Option<TranspositionTable>) {
     // interface-to-engine
     let (tx1, rx) = channel();
     let tx2 = tx1.clone();
@@ -101,7 +101,7 @@ fn cmd_go(mut _tokens: std::str::SplitWhitespace<'_>, board: &mut Board) {
         let _ = tx2.send(InterfaceMsg::Stop);
     });
 
-    let (line, eval) = best_line(board, None, Some(rx));
+    let (line, eval) = best_line(board, None, Some(rx), cache);
 
     let chosen = line.last().copied();
     println!(
@@ -133,6 +133,7 @@ fn main() {
     let stdin = io::stdin();
 
     let mut board = Board::starting_pos();
+    let mut transposition_table = Some(TranspositionTable::new(24));
 
     loop {
         let mut line = String::new();
@@ -156,7 +157,7 @@ fn main() {
                     board = cmd_position(tokens);
                 }
                 "go" => {
-                    cmd_go(tokens, &mut board);
+                    cmd_go(tokens, &mut board, &mut transposition_table);
                 }
                 // non-standard command.
                 "eval" => {

@@ -14,6 +14,7 @@ Copyright © 2024 dogeystamp <dogeystamp@disroot.org>
 //! Game-tree search.
 
 use crate::eval::{Eval, EvalInt};
+use crate::hash::ZobristTable;
 use crate::movegen::{Move, MoveGen};
 use crate::{Board, Piece};
 use std::cmp::max;
@@ -154,6 +155,7 @@ fn minmax(
     depth: usize,
     alpha: Option<EvalInt>,
     beta: Option<EvalInt>,
+    cache: &mut TranspositionTableOpt,
 ) -> (Vec<Move>, SearchEval) {
     // default to worst, then gradually improve
     let mut alpha = alpha.unwrap_or(EVAL_WORST);
@@ -165,7 +167,6 @@ fn minmax(
         return (Vec::new(), SearchEval::Centipawns(eval));
     }
 
-    // sort moves by decreasing priority
     let mut mvs: Vec<_> = board
         .gen_moves()
         .into_iter()
@@ -173,6 +174,15 @@ fn minmax(
         .into_iter()
         .map(|mv| (move_priority(board, &mv), mv))
         .collect();
+
+    // remember the prior best move
+    if let Some(cache) = cache {
+        if let Some(entry) = &cache[board.zobrist] {
+            mvs.push((EVAL_BEST, entry.best_move));
+        }
+    }
+
+    // sort moves by decreasing priority
     mvs.sort_unstable_by_key(|mv| -mv.0);
 
     let mut abs_best = SearchEval::Centipawns(EVAL_WORST);
@@ -190,7 +200,8 @@ fn minmax(
 
     for (_priority, mv) in mvs {
         let anti_mv = mv.make(board);
-        let (continuation, score) = minmax(board, config, depth - 1, Some(-beta), Some(-alpha));
+        let (continuation, score) =
+            minmax(board, config, depth - 1, Some(-beta), Some(-alpha), cache);
         let abs_score = score.increment();
         if abs_score > abs_best {
             abs_best = abs_score;
@@ -210,8 +221,11 @@ fn minmax(
         }
     }
 
-    if let Some(mv) = best_move {
-        best_continuation.push(mv);
+    if let Some(best_move) = best_move {
+        best_continuation.push(best_move);
+        if let Some(cache) = cache {
+            cache[board.zobrist] = Some(TranspositionEntry { best_move });
+        }
     }
 
     (best_continuation, abs_best)
@@ -224,14 +238,24 @@ pub enum InterfaceMsg {
 
 type InterfaceRx = mpsc::Receiver<InterfaceMsg>;
 
+#[derive(Clone, Copy, Debug)]
+pub struct TranspositionEntry {
+    // best move found last time
+    best_move: Move,
+}
+
+pub type TranspositionTable = ZobristTable<TranspositionEntry>;
+type TranspositionTableOpt = Option<TranspositionTable>;
+
 /// Iteratively deepen search until it is stopped.
 fn iter_deep(
     board: &mut Board,
     config: &SearchConfig,
     interface: Option<InterfaceRx>,
+    cache: &mut TranspositionTableOpt,
 ) -> (Vec<Move>, SearchEval) {
     for depth in 1..=config.depth {
-        let (line, eval) = minmax(board, config, depth, None, None);
+        let (line, eval) = minmax(board, config, depth, None, None, cache);
         if let Some(ref rx) = interface {
             match rx.try_recv() {
                 Ok(msg) => match msg {
@@ -254,9 +278,10 @@ pub fn best_line(
     board: &mut Board,
     config: Option<SearchConfig>,
     interface: Option<InterfaceRx>,
+    cache: &mut TranspositionTableOpt,
 ) -> (Vec<Move>, SearchEval) {
     let config = config.unwrap_or_default();
-    let (line, eval) = iter_deep(board, &config, interface);
+    let (line, eval) = iter_deep(board, &config, interface, cache);
     (line, eval)
 }
 
@@ -265,8 +290,9 @@ pub fn best_move(
     board: &mut Board,
     config: Option<SearchConfig>,
     interface: Option<InterfaceRx>,
+    cache: &mut TranspositionTableOpt,
 ) -> Option<Move> {
-    let (line, _eval) = best_line(board, Some(config.unwrap_or_default()), interface);
+    let (line, _eval) = best_line(board, Some(config.unwrap_or_default()), interface, cache);
     line.last().copied()
 }
 
@@ -292,6 +318,7 @@ mod tests {
                     depth: 3,
                 }),
                 None,
+                &mut None,
             )
             .unwrap();
 
@@ -304,6 +331,7 @@ mod tests {
                     depth: 3,
                 }),
                 None,
+                &mut None,
             )
             .unwrap();
 
