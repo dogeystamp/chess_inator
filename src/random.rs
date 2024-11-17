@@ -53,6 +53,7 @@ const fn pcg64_seed(mut rng: Pcg64Random) -> Pcg64Random {
 /// Example (generate 10 random numbers):
 ///
 ///```rust
+/// use crate::random::random_arr_64;
 /// const ARR: [u64; 10] = random_arr_64(123456);
 ///```
 pub const fn random_arr_64<const N: usize>(seed: u128) -> [u64; N] {
