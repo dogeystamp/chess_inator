@@ -13,22 +13,22 @@ Copyright © 2024 dogeystamp <dogeystamp@disroot.org>
 
 //! Zobrist hash implementation.
 
-use crate::random::{random_arr_2d_64, random_arr_64};
+use crate::random::Pcg64Random;
 use crate::{
     Board, CastleRights, ColPiece, Color, Square, BOARD_WIDTH, N_COLORS, N_PIECES, N_SQUARES,
 };
 
 const PIECE_KEYS: [[[u64; N_SQUARES]; N_PIECES]; N_COLORS] =
-    [random_arr_2d_64(11), random_arr_2d_64(22)];
+    [Pcg64Random::new(11).random_arr_2d_64(), Pcg64Random::new(22).random_arr_2d_64()];
 
 // 4 bits in castle perms -> 16 keys
-const CASTLE_KEYS: [u64; 16] = random_arr_64(33);
+const CASTLE_KEYS: [u64; 16] = Pcg64Random::new(33).random_arr_64();
 
 // ep can be specified by the file
-const EP_KEYS: [u64; BOARD_WIDTH] = random_arr_64(44);
+const EP_KEYS: [u64; BOARD_WIDTH] = Pcg64Random::new(44).random_arr_64();
 
 // current turn
-const COL_KEY: [u64; N_COLORS] = random_arr_64(55);
+const COL_KEY: [u64; N_COLORS] = Pcg64Random::new(55).random_arr_64();
 
 /// Zobrist hash state.
 ///

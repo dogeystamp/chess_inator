@@ -21,7 +21,7 @@ pub mod eval;
 pub mod fen;
 mod hash;
 pub mod movegen;
-mod random;
+pub mod random;
 pub mod search;
 
 use crate::fen::{FromFen, ToFen, START_POSITION};
