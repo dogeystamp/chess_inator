@@ -14,7 +14,7 @@ Copyright © 2024 dogeystamp <dogeystamp@disroot.org>
 //! Move generation.
 
 use crate::fen::ToFen;
-use crate::hash::Zobrist;
+use crate::hash::{Zobrist, ZobristTable};
 use crate::{
     Board, CastleRights, ColPiece, Color, Piece, Square, SquareError, BOARD_HEIGHT, BOARD_WIDTH,
     N_SQUARES,
@@ -770,8 +770,13 @@ impl MoveGenInternal for Board {
     }
 }
 
-/// How many nodes at depth N can be reached from this position.
-pub fn perft(depth: usize, pos: &mut Board) -> usize {
+fn perft_internal(depth: usize, pos: &mut Board, cache: &mut ZobristTable<(usize, usize)>) -> usize {
+    if let Some((ans, cache_depth)) = cache[pos.zobrist] {
+        if depth == cache_depth {
+            return ans;
+        }
+    }
+
     if depth == 0 {
         return 1;
     };
@@ -781,11 +786,18 @@ pub fn perft(depth: usize, pos: &mut Board) -> usize {
     let moves: Vec<Move> = pos.gen_moves().into_iter().collect();
     for mv in moves {
         let anti_move = mv.make(pos);
-        ans += perft(depth - 1, pos);
+        ans += perft_internal(depth - 1, pos, cache);
         anti_move.unmake(pos);
     }
 
+    cache[pos.zobrist] = Some((ans, depth));
     ans
+}
+
+/// How many nodes at depth N can be reached from this position.
+pub fn perft(depth: usize, pos: &mut Board) -> usize {
+    let mut cache = ZobristTable::new(23);
+    perft_internal(depth, pos, &mut cache)
 }
 
 #[cfg(test)]
