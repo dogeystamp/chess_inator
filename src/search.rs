@@ -257,14 +257,17 @@ fn iter_deep(
     for depth in 1..=config.depth {
         let (line, eval) = minmax(board, config, depth, None, None, cache);
         if let Some(ref rx) = interface {
-            match rx.try_recv() {
-                Ok(msg) => match msg {
-                    InterfaceMsg::Stop => return (line, eval),
-                },
-                Err(e) => match e {
-                    mpsc::TryRecvError::Empty => {}
-                    mpsc::TryRecvError::Disconnected => panic!("interface thread stopped"),
-                },
+            // don't interrupt a depth 1 search so that there's at least a move to be played
+            if depth != 1 {
+                match rx.try_recv() {
+                    Ok(msg) => match msg {
+                        InterfaceMsg::Stop => return (line, eval),
+                    },
+                    Err(e) => match e {
+                        mpsc::TryRecvError::Empty => {}
+                        mpsc::TryRecvError::Disconnected => panic!("interface thread stopped"),
+                    },
+                }
             }
         } else if depth == config.depth - 1 {
             return (line, eval);

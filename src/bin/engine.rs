@@ -16,7 +16,8 @@ use chess_inator::eval::eval_metrics;
 use chess_inator::fen::FromFen;
 use chess_inator::movegen::{FromUCIAlgebraic, Move, ToUCIAlgebraic};
 use chess_inator::search::{best_line, InterfaceMsg, SearchEval, TranspositionTable};
-use chess_inator::Board;
+use chess_inator::{Board, Color};
+use std::cmp::min;
 use std::io;
 use std::sync::mpsc::channel;
 use std::thread;
@@ -90,14 +91,45 @@ fn cmd_position(mut tokens: std::str::SplitWhitespace<'_>) -> Board {
 }
 
 /// Play the game.
-fn cmd_go(mut _tokens: std::str::SplitWhitespace<'_>, board: &mut Board, cache: &mut Option<TranspositionTable>) {
+fn cmd_go(
+    mut tokens: std::str::SplitWhitespace<'_>,
+    board: &mut Board,
+    cache: &mut Option<TranspositionTable>,
+) {
     // interface-to-engine
     let (tx1, rx) = channel();
     let tx2 = tx1.clone();
 
+    // can expect a 1sec soft timeout to more than that of thinking
+    let mut timeout = 1000;
+
+    while let Some(token) = tokens.next() {
+        match token {
+            "wtime" => {
+                if board.get_turn() == Color::White {
+                    if let Some(time) = tokens.next() {
+                        if let Ok(time) = time.parse::<u64>() {
+                            timeout = min(time / 50, timeout);
+                        }
+                    }
+                }
+            }
+            "btime" => {
+                if board.get_turn() == Color::Black {
+                    if let Some(time) = tokens.next() {
+                        if let Ok(time) = time.parse::<u64>() {
+                            timeout = min(time / 50, timeout);
+                        }
+                    }
+                }
+            }
+            _ => ignore!(),
+        }
+    }
+
     // timeout
     thread::spawn(move || {
-        thread::sleep(Duration::from_millis(1000));
+        thread::sleep(Duration::from_millis(timeout));
         let _ = tx2.send(InterfaceMsg::Stop);
     });
 
@@ -149,6 +181,7 @@ fn main() {
                 }
                 "ucinewgame" => {
                     board = Board::starting_pos();
+                    transposition_table = Some(TranspositionTable::new(24));
                 }
                 "quit" => {
                     return;
