@@ -24,13 +24,15 @@ pub mod movegen;
 pub mod random;
 pub mod search;
 
+pub mod prelude;
+
 use crate::fen::{FromFen, ToFen, START_POSITION};
 use crate::hash::Zobrist;
 use eval::eval_score::EvalScores;
 
-const BOARD_WIDTH: usize = 8;
-const BOARD_HEIGHT: usize = 8;
-const N_SQUARES: usize = BOARD_WIDTH * BOARD_HEIGHT;
+pub const BOARD_WIDTH: usize = 8;
+pub const BOARD_HEIGHT: usize = 8;
+pub const N_SQUARES: usize = BOARD_WIDTH * BOARD_HEIGHT;
 
 #[derive(Debug, Copy, Clone, Default, PartialEq, Eq)]
 pub enum Color {
@@ -38,7 +40,7 @@ pub enum Color {
     White = 0,
     Black = 1,
 }
-const N_COLORS: usize = 2;
+pub const N_COLORS: usize = 2;
 
 impl Color {
     /// Return opposite color (does not assign).
@@ -74,7 +76,7 @@ enum Piece {
     Queen,
     Pawn,
 }
-const N_PIECES: usize = 6;
+pub const N_PIECES: usize = 6;
 
 pub struct PieceErr;
 

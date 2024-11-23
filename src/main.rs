@@ -12,11 +12,7 @@ Copyright © 2024 dogeystamp <dogeystamp@disroot.org>
 
 //! Main UCI engine binary.
 
-use chess_inator::eval::eval_metrics;
-use chess_inator::fen::FromFen;
-use chess_inator::movegen::{FromUCIAlgebraic, Move, ToUCIAlgebraic};
-use chess_inator::search::{best_line, InterfaceMsg, SearchEval, TranspositionTable};
-use chess_inator::{Board, Color};
+use chess_inator::prelude::*;
 use std::cmp::min;
 use std::io;
 use std::sync::mpsc::channel;
