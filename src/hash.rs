@@ -20,8 +20,10 @@ use crate::{
 use std::ops::Index;
 use std::ops::IndexMut;
 
-const PIECE_KEYS: [[[u64; N_SQUARES]; N_PIECES]; N_COLORS] =
-    [Pcg64Random::new(11).random_arr_2d_64(), Pcg64Random::new(22).random_arr_2d_64()];
+const PIECE_KEYS: [[[u64; N_SQUARES]; N_PIECES]; N_COLORS] = [
+    Pcg64Random::new(11).random_arr_2d_64(),
+    Pcg64Random::new(22).random_arr_2d_64(),
+];
 
 // 4 bits in castle perms -> 16 keys
 const CASTLE_KEYS: [u64; 16] = Pcg64Random::new(33).random_arr_64();
@@ -100,7 +102,10 @@ pub struct ZobristTable<T> {
 impl<T: Copy> ZobristTable<T> {
     /// Create a table with 2^n entries.
     pub fn new(size: usize) -> Self {
-        assert!(size <= 27, "Attempted to make 2^{size} entry table; aborting to avoid excessive memory usage.");
+        assert!(
+            size <= 27,
+            "Attempted to make 2^{size} entry table; aborting to avoid excessive memory usage."
+        );
         ZobristTable {
             data: vec![(Zobrist { hash: 0 }, None); 1 << size],
             size,
@@ -212,7 +217,10 @@ mod tests {
             }
             pos.half_moves = pos_orig.half_moves;
             pos.full_moves = pos_orig.full_moves;
-            assert_eq!(pos, pos_orig, "test case is incorrect, position should loop back to the original");
+            assert_eq!(
+                pos, pos_orig,
+                "test case is incorrect, position should loop back to the original"
+            );
             assert_eq!(pos.zobrist, pos_orig.zobrist);
         }
     }
@@ -222,7 +230,9 @@ mod tests {
         let mut table = ZobristTable::<usize>::new(4);
 
         macro_rules! z {
-            ($i: expr) => { Zobrist { hash: $i } }
+            ($i: expr) => {
+                Zobrist { hash: $i }
+            };
         }
 
         let big_number = 1 << 62;

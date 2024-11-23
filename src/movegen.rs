@@ -770,7 +770,11 @@ impl MoveGenInternal for Board {
     }
 }
 
-fn perft_internal(depth: usize, pos: &mut Board, cache: &mut ZobristTable<(usize, usize)>) -> usize {
+fn perft_internal(
+    depth: usize,
+    pos: &mut Board,
+    cache: &mut ZobristTable<(usize, usize)>,
+) -> usize {
     if let Some((ans, cache_depth)) = cache[pos.zobrist] {
         if depth == cache_depth {
             return ans;
