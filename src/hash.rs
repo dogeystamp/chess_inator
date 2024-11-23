@@ -114,16 +114,15 @@ impl<T: Copy> ZobristTable<T> {
 }
 
 impl<T> IndexMut<Zobrist> for ZobristTable<T> {
+    /// Overwrite a table entry.
+    ///
+    /// If you `mut`ably index, it will automatically wipe an existing entry,
+    /// regardless of it was a cache hit or miss.
     fn index_mut(&mut self, zobrist: Zobrist) -> &mut Self::Output {
         let idx = zobrist.truncate_hash(self.size);
-        if self.data[idx].0 == zobrist {
-            &mut self.data[idx].1
-        } else {
-            // miss, overwrite
-            self.data[idx].0 = zobrist;
-            self.data[idx].1 = None;
-            &mut self.data[idx].1
-        }
+        self.data[idx].0 = zobrist;
+        self.data[idx].1 = None;
+        &mut self.data[idx].1
     }
 }
 
