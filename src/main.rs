@@ -96,8 +96,8 @@ fn cmd_go(
     let (tx1, rx) = channel();
     let tx2 = tx1.clone();
 
-    // can expect a 1sec soft timeout to more than that of thinking
-    let mut timeout = 1000;
+    // can expect a 1sec soft timeout to result in more time than that of thinking
+    let mut timeout = 1650;
 
     while let Some(token) = tokens.next() {
         match token {
