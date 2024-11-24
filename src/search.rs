@@ -175,9 +175,14 @@ fn minmax(
         .map(|mv| (move_priority(board, &mv), mv))
         .collect();
 
-    // remember the prior best move
+    // get transposition table entry
     if let Some(cache) = cache {
         if let Some(entry) = &cache[board.zobrist] {
+            // the entry has a deeper knowledge than we do, so follow its best move exactly instead of
+            // just prioritizing what it thinks is best
+            if entry.depth > depth {
+                mvs.clear();
+            }
             mvs.push((EVAL_BEST, entry.best_move));
         }
     }
@@ -224,7 +229,11 @@ fn minmax(
     if let Some(best_move) = best_move {
         best_continuation.push(best_move);
         if let Some(cache) = cache {
-            cache[board.zobrist] = Some(TranspositionEntry { best_move });
+            cache[board.zobrist] = Some(TranspositionEntry {
+                best_move,
+                eval: abs_best,
+                depth,
+            });
         }
     }
 
@@ -240,8 +249,12 @@ type InterfaceRx = mpsc::Receiver<InterfaceMsg>;
 
 #[derive(Clone, Copy, Debug)]
 pub struct TranspositionEntry {
-    // best move found last time
+    /// best move found last time
     best_move: Move,
+    /// last time's eval
+    eval: SearchEval,
+    /// depth of this entry
+    depth: usize,
 }
 
 pub type TranspositionTable = ZobristTable<TranspositionEntry>;
