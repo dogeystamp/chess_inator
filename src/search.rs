@@ -105,6 +105,7 @@ impl Default for SearchConfig {
     fn default() -> Self {
         SearchConfig {
             alpha_beta_on: true,
+            // try to make this even to be more conservative and avoid horizon problem
             depth: 10,
         }
     }
@@ -267,14 +268,24 @@ fn iter_deep(
     interface: Option<InterfaceRx>,
     cache: &mut TranspositionTableOpt,
 ) -> (Vec<Move>, SearchEval) {
-    for depth in 1..=config.depth {
+    let (mut prev_line, mut prev_eval) = minmax(board, config, 1, None, None, cache);
+    for depth in 2..=config.depth {
         let (line, eval) = minmax(board, config, depth, None, None, cache);
+
         if let Some(ref rx) = interface {
             // don't interrupt a depth 1 search so that there's at least a move to be played
             if depth != 1 {
                 match rx.try_recv() {
                     Ok(msg) => match msg {
-                        InterfaceMsg::Stop => return (line, eval),
+                        InterfaceMsg::Stop => {
+                            if depth & 1 == 0 && (EvalInt::from(eval) - EvalInt::from(prev_eval) > 300) {
+                                // be skeptical if we move last and we suddenly earn a lot of
+                                // centipawns. this may be a sign of horizon problem
+                                return (line, eval)
+                            } else {
+                                return (prev_line, prev_eval)
+                            }
+                        },
                     },
                     Err(e) => match e {
                         mpsc::TryRecvError::Empty => {}
@@ -285,8 +296,9 @@ fn iter_deep(
         } else if depth == config.depth - 1 {
             return (line, eval);
         }
+        (prev_line, prev_eval) = (line, eval);
     }
-    panic!("iterative deepening did not search at all")
+    (prev_line, prev_eval)
 }
 
 /// Find the best line (in reverse order) and its evaluation.
