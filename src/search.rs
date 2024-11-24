@@ -278,12 +278,12 @@ fn iter_deep(
                 match rx.try_recv() {
                     Ok(msg) => match msg {
                         InterfaceMsg::Stop => {
-                            if depth & 1 == 0 && (EvalInt::from(eval) - EvalInt::from(prev_eval) > 300) {
+                            if depth & 1 == 1 && (EvalInt::from(eval) - EvalInt::from(prev_eval) > 300) {
                                 // be skeptical if we move last and we suddenly earn a lot of
                                 // centipawns. this may be a sign of horizon problem
-                                return (line, eval)
-                            } else {
                                 return (prev_line, prev_eval)
+                            } else {
+                                return (line, eval)
                             }
                         },
                     },
