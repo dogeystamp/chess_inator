@@ -181,8 +181,9 @@ fn minmax(
         if let Some(entry) = &cache[board.zobrist] {
             // the entry has a deeper knowledge than we do, so follow its best move exactly instead of
             // just prioritizing what it thinks is best
-            if entry.depth > depth {
-                mvs.clear();
+            if entry.depth >= depth {
+                // we don't save PV line in transposition table, so no information on that
+                return (vec![entry.best_move], entry.eval)
             }
             mvs.push((EVAL_BEST, entry.best_move));
         }
