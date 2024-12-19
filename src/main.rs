@@ -11,6 +11,15 @@ Copyright © 2024 dogeystamp <dogeystamp@disroot.org>
 */
 
 //! Main UCI engine binary.
+//!
+//! This runs three threads, main, engine, and stdin. The main thread coordinates everything, and
+//! performs UCI parsing/communication. `stdin` is read on a different thread, in order to avoid
+//! blocking on it. The engine thread is where the actual computation happens. It communicates
+//! state (best move, evaluations, board state and configuration) with the main thread.
+//!
+//! The main thread has a single rx (receive) channel. This is so that it can wait for either the
+//! engine to finish a computation, or for stdin to receive a UCI command. This way, the engine is
+//! always listening, even when it is thinking.
 
 use chess_inator::prelude::*;
 use std::cmp::min;
@@ -301,18 +310,66 @@ fn cmd_eval(mut _tokens: std::str::SplitWhitespace<'_>, board: &mut Board) {
     println!("STATIC EVAL (negative black, positive white):\n- pst: {}\n- king distance: {} ({} distance)\n- phase: {}\n- total: {}", res.pst_eval, res.king_distance_eval, res.king_distance, res.phase, res.total_eval);
 }
 
+/// Root UCI parser.
+fn cmd_root(mut tokens: std::str::SplitWhitespace<'_>, board: &mut Board, cache: &mut TranspositionTable) {
+    while let Some(token) = tokens.next() {
+        match token {
+            "uci" => {
+                println!("{}", cmd_uci());
+            }
+            "isready" => {
+                println!("readyok");
+            }
+            "ucinewgame" => {
+                *board = Board::starting_pos();
+                *cache = TranspositionTable::new(24);
+            }
+            "quit" => {
+                return;
+            }
+            "position" => {
+                *board = cmd_position(tokens);
+            }
+            "go" => {
+                cmd_go(tokens, board, cache);
+            }
+            // non-standard command.
+            "eval" => {
+                cmd_eval(tokens, board);
+            }
+            _ => ignore!(),
+        }
+
+        break;
+    }
+}
+
+/// Message (engine->main) to communicate the best move.
+struct MsgBestmove {
+    /// Best line (reversed stack; last element is best current move)
+    pv: Vec<Move>,
+    /// Evaluation of the position
+    eval: SearchEval,
+}
+
+/// Interface messages that may be received by main's channel.
+enum MsgToMain {
+    StdinLine(String),
+    Bestmove(MsgBestmove),
+}
+
 /// Read stdin line-by-line in a non-blocking way (in another thread)
 ///
 /// # Arguments
 /// - `tx`: channel write end to send lines to
-fn task_stdin_reader(tx: Sender<String>) {
+fn task_stdin_reader(tx: Sender<MsgToMain>) {
     thread::spawn(move || {
         let stdin = io::stdin();
 
         loop {
             let mut line = String::new();
             stdin.read_line(&mut line).unwrap();
-            tx.send(line).unwrap();
+            tx.send(MsgToMain::StdinLine(line)).unwrap();
         }
     });
 }
@@ -325,37 +382,13 @@ fn main() {
     task_stdin_reader(tx.clone());
 
     loop {
-        let line = rx.recv().unwrap();
-        let mut tokens = line.split_whitespace();
-        while let Some(token) = tokens.next() {
-            match token {
-                "uci" => {
-                    println!("{}", cmd_uci());
-                }
-                "isready" => {
-                    println!("readyok");
-                }
-                "ucinewgame" => {
-                    board = Board::starting_pos();
-                    transposition_table = TranspositionTable::new(24);
-                }
-                "quit" => {
-                    return;
-                }
-                "position" => {
-                    board = cmd_position(tokens);
-                }
-                "go" => {
-                    cmd_go(tokens, &mut board, &mut transposition_table);
-                }
-                // non-standard command.
-                "eval" => {
-                    cmd_eval(tokens, &mut board);
-                }
-                _ => ignore!(),
+        let msg = rx.recv().unwrap();
+        match msg {
+            MsgToMain::StdinLine(line) => {
+                let tokens = line.split_whitespace();
+                cmd_root(tokens, &mut board, &mut transposition_table);
             }
-
-            break;
+            MsgToMain::Bestmove(msg_bestmove) => todo!(),
         }
     }
 }
