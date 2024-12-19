@@ -19,6 +19,7 @@ use std::sync::mpsc::channel;
 use std::thread;
 use std::time::Duration;
 
+
 /// UCI protocol says to ignore any unknown words.
 ///
 /// This macro exists to avoid copy-pasting this explanation everywhere.
@@ -90,7 +91,7 @@ fn cmd_position(mut tokens: std::str::SplitWhitespace<'_>) -> Board {
 fn cmd_go(
     mut tokens: std::str::SplitWhitespace<'_>,
     board: &mut Board,
-    cache: &mut Option<TranspositionTable>,
+    cache: &mut TranspositionTable,
 ) {
     // interface-to-engine
     let (tx1, rx) = channel();
@@ -129,7 +130,8 @@ fn cmd_go(
         let _ = tx2.send(InterfaceMsg::Stop);
     });
 
-    let (line, eval) = best_line(board, None, Some(rx), cache);
+    let mut engine_state = EngineState::new(SearchConfig::default(), rx, cache);
+    let (line, eval) = best_line(board, &mut engine_state);
 
     let chosen = line.last().copied();
     println!(
@@ -161,7 +163,7 @@ fn main() {
     let stdin = io::stdin();
 
     let mut board = Board::starting_pos();
-    let mut transposition_table = Some(TranspositionTable::new(24));
+    let mut transposition_table = TranspositionTable::new(24);
 
     loop {
         let mut line = String::new();
@@ -177,7 +179,7 @@ fn main() {
                 }
                 "ucinewgame" => {
                     board = Board::starting_pos();
-                    transposition_table = Some(TranspositionTable::new(24));
+                    transposition_table = TranspositionTable::new(24);
                 }
                 "quit" => {
                     return;

@@ -99,6 +99,8 @@ pub struct SearchConfig {
     alpha_beta_on: bool,
     /// Limit regular search depth
     depth: usize,
+    /// Enable transposition table.
+    enable_trans_table: bool,
 }
 
 impl Default for SearchConfig {
@@ -107,6 +109,7 @@ impl Default for SearchConfig {
             alpha_beta_on: true,
             // try to make this even to be more conservative and avoid horizon problem
             depth: 10,
+            enable_trans_table: true,
         }
     }
 }
@@ -152,11 +155,10 @@ fn move_priority(board: &mut Board, mv: &Move) -> EvalInt {
 /// The best line (in reverse move order), and its corresponding absolute eval for the current player.
 fn minmax(
     board: &mut Board,
-    config: &SearchConfig,
+    engine_state: &mut EngineState<'_>,
     depth: usize,
     alpha: Option<EvalInt>,
     beta: Option<EvalInt>,
-    cache: &mut TranspositionTableOpt,
 ) -> (Vec<Move>, SearchEval) {
     // default to worst, then gradually improve
     let mut alpha = alpha.unwrap_or(EVAL_WORST);
@@ -177,13 +179,13 @@ fn minmax(
         .collect();
 
     // get transposition table entry
-    if let Some(cache) = cache {
-        if let Some(entry) = &cache[board.zobrist] {
+    if engine_state.config.enable_trans_table {
+        if let Some(entry) = &engine_state.cache[board.zobrist] {
             // the entry has a deeper knowledge than we do, so follow its best move exactly instead of
             // just prioritizing what it thinks is best
             if entry.depth >= depth {
                 // we don't save PV line in transposition table, so no information on that
-                return (vec![entry.best_move], entry.eval)
+                return (vec![entry.best_move], entry.eval);
             }
             mvs.push((EVAL_BEST, entry.best_move));
         }
@@ -208,7 +210,7 @@ fn minmax(
     for (_priority, mv) in mvs {
         let anti_mv = mv.make(board);
         let (continuation, score) =
-            minmax(board, config, depth - 1, Some(-beta), Some(-alpha), cache);
+            minmax(board, engine_state, depth - 1, Some(-beta), Some(-alpha));
         let abs_score = score.increment();
         if abs_score > abs_best {
             abs_best = abs_score;
@@ -217,7 +219,7 @@ fn minmax(
         }
         alpha = max(alpha, abs_best.into());
         anti_mv.unmake(board);
-        if alpha >= beta && config.alpha_beta_on {
+        if alpha >= beta && engine_state.config.alpha_beta_on {
             // alpha-beta prune.
             //
             // Beta represents the best eval that the other player can get in sibling branches
@@ -230,8 +232,8 @@ fn minmax(
 
     if let Some(best_move) = best_move {
         best_continuation.push(best_move);
-        if let Some(cache) = cache {
-            cache[board.zobrist] = Some(TranspositionEntry {
+        if engine_state.config.enable_trans_table {
+            engine_state.cache[board.zobrist] = Some(TranspositionEntry {
                 best_move,
                 eval: abs_best,
                 depth,
@@ -260,68 +262,68 @@ pub struct TranspositionEntry {
 }
 
 pub type TranspositionTable = ZobristTable<TranspositionEntry>;
-type TranspositionTableOpt = Option<TranspositionTable>;
 
 /// Iteratively deepen search until it is stopped.
-fn iter_deep(
-    board: &mut Board,
-    config: &SearchConfig,
-    interface: Option<InterfaceRx>,
-    cache: &mut TranspositionTableOpt,
-) -> (Vec<Move>, SearchEval) {
-    let (mut prev_line, mut prev_eval) = minmax(board, config, 1, None, None, cache);
-    for depth in 2..=config.depth {
-        let (line, eval) = minmax(board, config, depth, None, None, cache);
+fn iter_deep(board: &mut Board, engine_state: &mut EngineState<'_>) -> (Vec<Move>, SearchEval) {
+    // don't interrupt a depth 1 search so that there's at least a move to be played
+    let (mut prev_line, mut prev_eval) = minmax(board, engine_state, 1, None, None);
+    for depth in 2..=engine_state.config.depth {
+        let (line, eval) = minmax(board, engine_state, depth, None, None);
 
-        if let Some(ref rx) = interface {
-            // don't interrupt a depth 1 search so that there's at least a move to be played
-            if depth != 1 {
-                match rx.try_recv() {
-                    Ok(msg) => match msg {
-                        InterfaceMsg::Stop => {
-                            if depth & 1 == 1 && (EvalInt::from(eval) - EvalInt::from(prev_eval) > 300) {
-                                // be skeptical if we move last and we suddenly earn a lot of
-                                // centipawns. this may be a sign of horizon problem
-                                return (prev_line, prev_eval)
-                            } else {
-                                return (line, eval)
-                            }
-                        },
-                    },
-                    Err(e) => match e {
-                        mpsc::TryRecvError::Empty => {}
-                        mpsc::TryRecvError::Disconnected => panic!("interface thread stopped"),
-                    },
+        match engine_state.interface.try_recv() {
+            Ok(msg) => match msg {
+                InterfaceMsg::Stop => {
+                    if depth & 1 == 1 && (EvalInt::from(eval) - EvalInt::from(prev_eval) > 300) {
+                        // be skeptical if we move last and we suddenly earn a lot of
+                        // centipawns. this may be a sign of horizon problem
+                        return (prev_line, prev_eval);
+                    } else {
+                        return (line, eval);
+                    }
                 }
-            }
-        } else if depth == config.depth - 1 {
-            return (line, eval);
+            },
+            Err(e) => match e {
+                mpsc::TryRecvError::Empty => {}
+                mpsc::TryRecvError::Disconnected => panic!("interface thread stopped"),
+            },
         }
         (prev_line, prev_eval) = (line, eval);
     }
     (prev_line, prev_eval)
 }
 
+/// Helper type to avoid retyping the same arguments into every function prototype
+pub struct EngineState<'a> {
+    /// Configuration
+    config: SearchConfig,
+    /// Channel that can talk to the main thread
+    interface: InterfaceRx,
+    cache: &'a mut TranspositionTable,
+}
+
+impl<'a> EngineState<'a> {
+    pub fn new(
+        config: SearchConfig,
+        interface: InterfaceRx,
+        cache: &'a mut TranspositionTable,
+    ) -> Self {
+        Self {
+            config,
+            interface,
+            cache,
+        }
+    }
+}
+
 /// Find the best line (in reverse order) and its evaluation.
-pub fn best_line(
-    board: &mut Board,
-    config: Option<SearchConfig>,
-    interface: Option<InterfaceRx>,
-    cache: &mut TranspositionTableOpt,
-) -> (Vec<Move>, SearchEval) {
-    let config = config.unwrap_or_default();
-    let (line, eval) = iter_deep(board, &config, interface, cache);
+pub fn best_line(board: &mut Board, engine_state: &mut EngineState<'_>) -> (Vec<Move>, SearchEval) {
+    let (line, eval) = iter_deep(board, engine_state);
     (line, eval)
 }
 
 /// Find the best move.
-pub fn best_move(
-    board: &mut Board,
-    config: Option<SearchConfig>,
-    interface: Option<InterfaceRx>,
-    cache: &mut TranspositionTableOpt,
-) -> Option<Move> {
-    let (line, _eval) = best_line(board, Some(config.unwrap_or_default()), interface, cache);
+pub fn best_move(board: &mut Board, engine_state: &mut EngineState<'_>) -> Option<Move> {
+    let (line, _eval) = best_line(board, engine_state);
     line.last().copied()
 }
 
@@ -340,27 +342,40 @@ mod tests {
         ];
         for fen in test_cases {
             let mut board = Board::from_fen(fen).unwrap();
-            let mv_no_prune = best_move(
-                &mut board,
-                Some(SearchConfig {
+            let (_tx, _rx) = mpsc::channel();
+            let mut _cache = ZobristTable::new(0);
+            let mut engine_state = EngineState::new(
+                SearchConfig {
                     alpha_beta_on: false,
                     depth: 3,
-                }),
-                None,
-                &mut None,
+                    enable_trans_table: false,
+                },
+                _rx,
+                &mut _cache,
+            );
+
+            let mv_no_prune = best_move(
+                &mut board,
+                &mut engine_state,
             )
             .unwrap();
 
             assert_eq!(board.to_fen(), fen);
 
-            let mv_with_prune = best_move(
-                &mut board,
-                Some(SearchConfig {
+            let (_tx, _rx) = mpsc::channel();
+            let mut engine_state = EngineState::new(
+                SearchConfig {
                     alpha_beta_on: true,
                     depth: 3,
-                }),
-                None,
-                &mut None,
+                    enable_trans_table: false,
+                },
+                _rx,
+                &mut _cache,
+            );
+
+            let mv_with_prune = best_move(
+                &mut board,
+                &mut engine_state,
             )
             .unwrap();
 
