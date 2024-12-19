@@ -19,6 +19,148 @@ use std::sync::mpsc::channel;
 use std::thread;
 use std::time::Duration;
 
+/// State machine states.
+#[derive(Clone, Copy, Debug)]
+enum UCIMode {
+    /// It is engine's turn; engine is thinking about a move.
+    Think,
+    /// It is the opponent's turn; engine is thinking about a move.
+    Ponder,
+    /// The engine is not doing anything.
+    Idle,
+}
+
+/// State machine transitions.
+#[derive(Clone, Copy, Debug)]
+enum UCIModeTransition {
+    /// Engine produces a best move result. Thinking to Idle.
+    Bestmove,
+    /// Engine is stopped via a UCI `stop` command. Thinking/Ponder to Idle.
+    Stop,
+    /// Engine is asked for a best move through a UCI `go`. Idle -> Thinking.
+    Go,
+    /// Engine starts pondering on the opponent's time. Idle -> Ponder.
+    GoPonder,
+    /// While engine ponders, the opponent plays a different move than expected. Ponder -> Thinking
+    ///
+    /// In UCI, this means that a new `position` command is sent.
+    PonderMiss,
+    /// While engine ponders, the opponent plays the expected move (`ponderhit`). Ponder -> Thinking
+    PonderHit,
+}
+
+impl UCIModeTransition {
+    /// The state that a transition goes to.
+    const fn dest_mode(&self) -> UCIMode {
+        use UCIMode::*;
+        use UCIModeTransition::*;
+        match self {
+            Bestmove => Idle,
+            Stop => Idle,
+            Go => Think,
+            GoPonder => Ponder,
+            PonderMiss => Think,
+            PonderHit => Think,
+        }
+    }
+}
+
+/// State machine for engine's UCI modes.
+#[derive(Debug)]
+struct UCIModeMachine {
+    mode: UCIMode,
+}
+
+#[derive(Debug)]
+struct InvalidTransitionError {
+    /// Original state.
+    from: UCIMode,
+    /// Desired destination state.
+    to: UCIMode,
+}
+
+impl Default for UCIModeMachine {
+    fn default() -> Self {
+        UCIModeMachine {
+            mode: UCIMode::Idle,
+        }
+    }
+}
+
+impl UCIModeMachine {
+    /// Change state (checked to prevent invalid transitions.)
+    fn transition(&mut self, t: UCIModeTransition) -> Result<(), InvalidTransitionError> {
+        macro_rules! illegal {
+            () => {
+                return Err(InvalidTransitionError {
+                    from: self.mode,
+                    to: t.dest_mode(),
+                })
+            };
+        }
+        macro_rules! legal {
+            () => {{
+                self.mode = t.dest_mode();
+                return Ok(());
+            }};
+        }
+
+        use UCIModeTransition::*;
+
+        match t {
+            Bestmove => match self.mode {
+                UCIMode::Think => legal!(),
+                _ => illegal!(),
+            },
+            Stop => match self.mode {
+                UCIMode::Ponder | UCIMode::Think => legal!(),
+                _ => illegal!(),
+            },
+            Go | GoPonder => match self.mode {
+                UCIMode::Idle => legal!(),
+                _ => illegal!(),
+            },
+            PonderMiss => match self.mode {
+                UCIMode::Ponder => legal!(),
+                _ => illegal!(),
+            },
+            PonderHit => match self.mode {
+                UCIMode::Ponder => legal!(),
+                _ => illegal!(),
+            },
+        }
+    }
+}
+
+#[cfg(test)]
+mod test_state_machine {
+    use super::*;
+
+    /// Non-exhaustive test of state machine.
+    #[test]
+    fn test_transitions() {
+        let mut machine = UCIModeMachine {
+            mode: UCIMode::Idle,
+        };
+        assert!(matches!(machine.transition(UCIModeTransition::Go), Ok(())));
+        assert!(matches!(machine.mode, UCIMode::Think));
+        assert!(matches!(
+            machine.transition(UCIModeTransition::Stop),
+            Ok(())
+        ));
+        assert!(matches!(machine.mode, UCIMode::Idle));
+        assert!(matches!(machine.transition(UCIModeTransition::Go), Ok(())));
+        assert!(matches!(
+            machine.transition(UCIModeTransition::Bestmove),
+            Ok(())
+        ));
+        assert!(matches!(machine.mode, UCIMode::Idle));
+        assert!(matches!(
+            machine.transition(UCIModeTransition::Bestmove),
+            Err(_)
+        ));
+    }
+}
 
 /// UCI protocol says to ignore any unknown words.
 ///
