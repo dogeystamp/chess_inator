@@ -15,7 +15,7 @@ Copyright © 2024 dogeystamp <dogeystamp@disroot.org>
 use chess_inator::prelude::*;
 use std::cmp::min;
 use std::io;
-use std::sync::mpsc::channel;
+use std::sync::mpsc::{channel, Sender};
 use std::thread;
 use std::time::Duration;
 
@@ -301,15 +301,31 @@ fn cmd_eval(mut _tokens: std::str::SplitWhitespace<'_>, board: &mut Board) {
     println!("STATIC EVAL (negative black, positive white):\n- pst: {}\n- king distance: {} ({} distance)\n- phase: {}\n- total: {}", res.pst_eval, res.king_distance_eval, res.king_distance, res.phase, res.total_eval);
 }
 
-fn main() {
-    let stdin = io::stdin();
+/// Read stdin line-by-line in a non-blocking way (in another thread)
+///
+/// # Arguments
+/// - `tx`: channel write end to send lines to
+fn task_stdin_reader(tx: Sender<String>) {
+    thread::spawn(move || {
+        let stdin = io::stdin();
 
+        loop {
+            let mut line = String::new();
+            stdin.read_line(&mut line).unwrap();
+            tx.send(line).unwrap();
+        }
+    });
+}
+
+fn main() {
     let mut board = Board::starting_pos();
     let mut transposition_table = TranspositionTable::new(24);
 
+    let (tx, rx) = channel();
+    task_stdin_reader(tx.clone());
+
     loop {
-        let mut line = String::new();
-        stdin.read_line(&mut line).unwrap();
+        let line = rx.recv().unwrap();
         let mut tokens = line.split_whitespace();
         while let Some(token) = tokens.next() {
             match token {
