@@ -17,6 +17,7 @@ use std::fmt::Display;
 use std::ops::{Index, IndexMut};
 use std::str::FromStr;
 
+pub mod coordination;
 pub mod eval;
 pub mod fen;
 mod hash;
@@ -432,7 +433,7 @@ impl Display for CastleRights {
     }
 }
 
-/// Immutable game state, unique to a position.
+/// Game state, describes a position.
 ///
 /// Default is empty.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]

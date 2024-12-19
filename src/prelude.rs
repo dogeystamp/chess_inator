@@ -16,5 +16,6 @@ Copyright © 2024 dogeystamp <dogeystamp@disroot.org>
 pub use crate::eval::{eval_metrics, EvalMetrics};
 pub use crate::fen::{FromFen, ToFen};
 pub use crate::movegen::{FromUCIAlgebraic, Move, MoveGen, ToUCIAlgebraic};
-pub use crate::search::{best_line, best_move, InterfaceMsg, SearchEval, TranspositionTable, EngineState, SearchConfig};
+pub use crate::search::{best_line, best_move, SearchEval, TranspositionTable, EngineState, SearchConfig, TimeLimits};
 pub use crate::{Board, Color, BOARD_HEIGHT, BOARD_WIDTH, N_COLORS, N_PIECES, N_SQUARES};
+pub use crate::coordination::{UCIMode, UCIModeTransition, UCIModeMachine, MsgBestmove, MsgToMain, MsgToEngine, GoMessage};
