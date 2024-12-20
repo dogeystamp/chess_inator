@@ -135,18 +135,26 @@ fn cmd_go(mut tokens: std::str::SplitWhitespace<'_>, state: &mut MainState) {
         }
     }
 
-    let (ourtime_ms, theirtime_ms) = if state.board.get_turn() == Color::White {
+    let (mut ourtime_ms, theirtime_ms) = if state.board.get_turn() == Color::White {
         (wtime, btime)
     } else {
         (btime, wtime)
     };
+
+    if ourtime_ms == 0 {
+        ourtime_ms = 300_000
+    }
 
     state
         .tx_engine
         .send(MsgToEngine::Go(Box::new(GoMessage {
             board: state.board,
             config: state.config,
-            time_lims: TimeLimits::from_ourtime_theirtime(ourtime_ms, theirtime_ms),
+            time_lims: TimeLimits::from_ourtime_theirtime(
+                ourtime_ms,
+                theirtime_ms,
+                eval_metrics(&state.board),
+            ),
         })))
         .unwrap();
 }

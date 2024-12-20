@@ -69,7 +69,7 @@ impl From<Color> for char {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-enum Piece {
+pub enum Piece {
     Rook,
     Bishop,
     Knight,

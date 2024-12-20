@@ -13,11 +13,8 @@ Copyright © 2024 dogeystamp <dogeystamp@disroot.org>
 
 //! Game-tree search.
 
-use crate::coordination::MsgToEngine;
-use crate::eval::{Eval, EvalInt};
+use crate::prelude::*;
 use crate::hash::ZobristTable;
-use crate::movegen::{Move, MoveGen};
-use crate::{Board, Piece};
 use std::cmp::{max, min};
 use std::sync::mpsc;
 use std::time::{Instant, Duration};
@@ -345,11 +342,18 @@ pub struct TimeLimits {
 
 impl TimeLimits {
     /// Make time limits based on wtime, btime (but color-independent).
-    pub fn from_ourtime_theirtime(ourtime_ms: u64, _theirtime_ms: u64) -> TimeLimits {
+    ///
+    /// Also takes in eval metrics, for instance to avoid wasting too much time in the opening.
+    pub fn from_ourtime_theirtime(ourtime_ms: u64, _theirtime_ms: u64, eval: EvalMetrics) -> TimeLimits {
         // hard timeout (max)
         let mut hard_ms = 100_000;
         // soft timeout (max)
         let mut soft_ms = 1_200;
+
+        // if we have more than 5 minutes, and we're out of the opening, we can afford to think longer
+        if ourtime_ms > 300_000 && eval.phase <= 13 {
+            soft_ms = 3_000
+        }
 
         let factor = if ourtime_ms > 5_000 { 10 } else { 40 };
         hard_ms = min(ourtime_ms / factor, hard_ms);
