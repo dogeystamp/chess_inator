@@ -113,7 +113,7 @@ fn cmd_position(mut tokens: std::str::SplitWhitespace<'_>, state: &mut MainState
 /// Play the game.
 fn cmd_go(mut tokens: std::str::SplitWhitespace<'_>, state: &mut MainState) {
     // hard timeout
-    let mut hard_ms = 15_000;
+    let mut hard_ms = 100_000;
     // soft timeout
     let mut soft_ms = 1_200;
 
@@ -230,7 +230,7 @@ fn outp_bestmove(bestmove: MsgBestmove) {
             println!("info score cp {}", eval,)
         }
         SearchEval::Stopped => {
-            println!("info string ERROR: stopped search")
+            panic!("info string ERROR: stopped search")
         }
     }
     match chosen {
@@ -278,12 +278,9 @@ fn task_engine(tx_main: Sender<MsgToMain>, rx_engine: Receiver<MsgToEngine>) {
                         .send(MsgToMain::Bestmove(MsgBestmove { pv, eval }))
                         .unwrap();
                 }
-                MsgToEngine::Stop => {
-                    // Main keeps track of state, so this should not happen.
-                    panic!("Received stop while idle.");
-                }
+                MsgToEngine::Stop => {}
                 MsgToEngine::NewGame => {
-                    state.cache = TranspositionTable::new(state.config.transposition_size);
+                    state.wipe_state();
                 }
             }
         }

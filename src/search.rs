@@ -170,7 +170,7 @@ fn minmax(
     beta: Option<EvalInt>,
 ) -> (Vec<Move>, SearchEval) {
     // these operations are relatively expensive, so only run them occasionally
-    if state.node_count % ((1 << 31) - 1) == 0 {
+    if state.node_count % (1 << 16) == 0 {
         // respect the hard stop if given
         match state.rx_engine.try_recv() {
             Ok(msg) => match msg {
@@ -192,7 +192,6 @@ fn minmax(
             }
         }
     }
-    state.node_count += 1;
 
     // default to worst, then gradually improve
     let mut alpha = alpha.unwrap_or(EVAL_WORST);
@@ -280,6 +279,7 @@ fn minmax(
         }
     }
 
+    state.node_count += 1;
     (best_continuation, abs_best)
 }
 
@@ -297,26 +297,42 @@ pub type TranspositionTable = ZobristTable<TranspositionEntry>;
 
 /// Iteratively deepen search until it is stopped.
 fn iter_deep(board: &mut Board, state: &mut EngineState) -> (Vec<Move>, SearchEval) {
-    let (mut prev_line, mut prev_eval) = minmax(board, state, 1, None, None);
+    // always preserve two lines (1 is most recent)
+    let (mut line1, mut eval1) = minmax(board, state, 1, None, None);
+    let (mut line2, mut eval2) = (line1.clone(), eval1);
 
     for depth in 2..=state.config.depth {
         let (line, eval) = minmax(board, state, depth, None, None);
 
-        if let Some(soft_lim) = state.time_lims.soft {
-            if Instant::now() > soft_lim {
-                if depth & 1 == 1 && (EvalInt::from(eval) - EvalInt::from(prev_eval) > 300) {
-                    // be skeptical if we move last and we suddenly earn a lot of
-                    // centipawns. this may be a sign of horizon problem
-                    return (prev_line, prev_eval);
-                } else {
-                    return (line, eval);
+        let mut have_to_ret = false;
+        // depth of the line we're about to return.
+        // our knock-off "quiescence" is skeptical of odd depths, so we need to know this.
+        let mut ret_depth = depth;
+
+        if matches!(eval, SearchEval::Stopped) {
+            ret_depth -= 1;
+            have_to_ret = true;
+        } else {
+            (line2, eval2) = (line1, eval1);
+            (line1, eval1) = (line, eval);
+            if let Some(soft_lim) = state.time_lims.soft {
+                if Instant::now() > soft_lim {
+                    have_to_ret = true;
                 }
             }
         }
 
-        (prev_line, prev_eval) = (line, eval);
+        if have_to_ret {
+            if ret_depth & 1 == 1 && (EvalInt::from(eval1) - EvalInt::from(eval2) > 300) {
+                // be skeptical if we move last and we suddenly earn a lot of
+                // centipawns. this may be a sign of horizon problem
+                return (line2, eval2);
+            } else {
+                return (line1, eval1);
+            }
+        }
     }
-    (prev_line, prev_eval)
+    (line1, eval1)
 }
 
 /// Deadlines for the engine to think of a move.
@@ -337,7 +353,7 @@ pub struct EngineState {
     pub rx_engine: mpsc::Receiver<MsgToEngine>,
     pub cache: TranspositionTable,
     /// Nodes traversed (i.e. number of times minmax called)
-    node_count: usize,
+    pub node_count: usize,
     pub time_lims: TimeLimits,
 }
 
@@ -355,6 +371,14 @@ impl EngineState {
             node_count: 0,
             time_lims,
         }
+    }
+
+    /// Wipe state between different games.
+    ///
+    /// Configuration is preserved.
+    pub fn wipe_state(&mut self) {
+        self.cache = TranspositionTable::new(self.config.transposition_size);
+        self.node_count = 0;
     }
 }
 
