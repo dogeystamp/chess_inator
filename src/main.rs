@@ -12,164 +12,34 @@ Copyright © 2024 dogeystamp <dogeystamp@disroot.org>
 
 //! Main UCI engine binary.
 //!
-//! This runs three threads, main, engine, and stdin. The main thread coordinates everything, and
-//! performs UCI parsing/communication. `stdin` is read on a different thread, in order to avoid
-//! blocking on it. The engine thread is where the actual computation happens. It communicates
-//! state (best move, evaluations, board state and configuration) with the main thread.
+//! # Architecture
 //!
-//! The main thread has a single rx (receive) channel. This is so that it can wait for either the
-//! engine to finish a computation, or for stdin to receive a UCI command. This way, the engine is
-//! always listening, even when it is thinking.
+//! This runs three threads, Main, Engine, and Stdin. Main coordinates everything, and performs UCI
+//! parsing/communication. Stdin is read on a different thread, in order to avoid blocking on it.
+//! The Engine is where the actual computation happens. It communicates state (best move, evaluations,
+//! board state and configuration) with Main.
+//!
+//! Main has a single rx (receive) channel. This is so that it can wait for either the Engine to
+//! finish a computation, or for Stdin to receive a UCI command. This way, the overall engine
+//! program is always listening, even when it is thinking.
+//!
+//! For every go command, Main sends data, notably the current position and engine configuration,
+//! to the Engine. The current position and config are re-sent every time because Main is where the
+//! opponent's move, as well as any configuration options, are read and parsed. Meanwhile, internal
+//! data, like the transposition table, is owned by the Engine thread.
+//!
+//! # Notes
+//!
+//! - The naming scheme for channels here is `tx_main`, `rx_main` for "transmit to Main" and
+//!   "receive at Main" respectively. These names would be used for one channel.
 
 use chess_inator::prelude::*;
 use std::cmp::min;
 use std::io;
-use std::sync::mpsc::{channel, Sender};
+use std::process::exit;
+use std::sync::mpsc::{channel, Receiver, Sender};
 use std::thread;
-use std::time::Duration;
-
-/// State machine states.
-#[derive(Clone, Copy, Debug)]
-enum UCIMode {
-    /// It is engine's turn; engine is thinking about a move.
-    Think,
-    /// It is the opponent's turn; engine is thinking about a move.
-    Ponder,
-    /// The engine is not doing anything.
-    Idle,
-}
-
-/// State machine transitions.
-#[derive(Clone, Copy, Debug)]
-enum UCIModeTransition {
-    /// Engine produces a best move result. Thinking to Idle.
-    Bestmove,
-    /// Engine is stopped via a UCI `stop` command. Thinking/Ponder to Idle.
-    Stop,
-    /// Engine is asked for a best move through a UCI `go`. Idle -> Thinking.
-    Go,
-    /// Engine starts pondering on the opponent's time. Idle -> Ponder.
-    GoPonder,
-    /// While engine ponders, the opponent plays a different move than expected. Ponder -> Thinking
-    ///
-    /// In UCI, this means that a new `position` command is sent.
-    PonderMiss,
-    /// While engine ponders, the opponent plays the expected move (`ponderhit`). Ponder -> Thinking
-    PonderHit,
-}
-
-impl UCIModeTransition {
-    /// The state that a transition goes to.
-    const fn dest_mode(&self) -> UCIMode {
-        use UCIMode::*;
-        use UCIModeTransition::*;
-        match self {
-            Bestmove => Idle,
-            Stop => Idle,
-            Go => Think,
-            GoPonder => Ponder,
-            PonderMiss => Think,
-            PonderHit => Think,
-        }
-    }
-}
-
-/// State machine for engine's UCI modes.
-#[derive(Debug)]
-struct UCIModeMachine {
-    mode: UCIMode,
-}
-
-#[derive(Debug)]
-struct InvalidTransitionError {
-    /// Original state.
-    from: UCIMode,
-    /// Desired destination state.
-    to: UCIMode,
-}
-
-impl Default for UCIModeMachine {
-    fn default() -> Self {
-        UCIModeMachine {
-            mode: UCIMode::Idle,
-        }
-    }
-}
-
-impl UCIModeMachine {
-    /// Change state (checked to prevent invalid transitions.)
-    fn transition(&mut self, t: UCIModeTransition) -> Result<(), InvalidTransitionError> {
-        macro_rules! illegal {
-            () => {
-                return Err(InvalidTransitionError {
-                    from: self.mode,
-                    to: t.dest_mode(),
-                })
-            };
-        }
-        macro_rules! legal {
-            () => {{
-                self.mode = t.dest_mode();
-                return Ok(());
-            }};
-        }
-
-        use UCIModeTransition::*;
-
-        match t {
-            Bestmove => match self.mode {
-                UCIMode::Think => legal!(),
-                _ => illegal!(),
-            },
-            Stop => match self.mode {
-                UCIMode::Ponder | UCIMode::Think => legal!(),
-                _ => illegal!(),
-            },
-            Go | GoPonder => match self.mode {
-                UCIMode::Idle => legal!(),
-                _ => illegal!(),
-            },
-            PonderMiss => match self.mode {
-                UCIMode::Ponder => legal!(),
-                _ => illegal!(),
-            },
-            PonderHit => match self.mode {
-                UCIMode::Ponder => legal!(),
-                _ => illegal!(),
-            },
-        }
-    }
-}
-
-#[cfg(test)]
-mod test_state_machine {
-    use super::*;
-
-    /// Non-exhaustive test of state machine.
-    #[test]
-    fn test_transitions() {
-        let mut machine = UCIModeMachine {
-            mode: UCIMode::Idle,
-        };
-        assert!(matches!(machine.transition(UCIModeTransition::Go), Ok(())));
-        assert!(matches!(machine.mode, UCIMode::Think));
-        assert!(matches!(
-            machine.transition(UCIModeTransition::Stop),
-            Ok(())
-        ));
-        assert!(matches!(machine.mode, UCIMode::Idle));
-        assert!(matches!(machine.transition(UCIModeTransition::Go), Ok(())));
-        assert!(matches!(
-            machine.transition(UCIModeTransition::Bestmove),
-            Ok(())
-        ));
-        assert!(matches!(machine.mode, UCIMode::Idle));
-        assert!(matches!(
-            machine.transition(UCIModeTransition::Bestmove),
-            Err(_)
-        ));
-    }
-}
+use std::time::{Duration, Instant};
 
 /// UCI protocol says to ignore any unknown words.
 ///
@@ -206,7 +76,7 @@ fn cmd_position_moves(mut tokens: std::str::SplitWhitespace<'_>, mut board: Boar
 }
 
 /// Sets the position.
-fn cmd_position(mut tokens: std::str::SplitWhitespace<'_>) -> Board {
+fn cmd_position(mut tokens: std::str::SplitWhitespace<'_>, state: &mut MainState) {
     while let Some(token) = tokens.next() {
         match token {
             "fen" => {
@@ -223,95 +93,81 @@ fn cmd_position(mut tokens: std::str::SplitWhitespace<'_>) -> Board {
                     .unwrap_or_else(|e| panic!("failed to parse fen '{fen}': {e:?}"));
                 let board = cmd_position_moves(tokens, board);
 
-                return board;
+                state.board = board;
+                return;
             }
             "startpos" => {
                 let board = Board::starting_pos();
                 let board = cmd_position_moves(tokens, board);
 
-                return board;
+                state.board = board;
+                return;
             }
             _ => ignore!(),
         }
     }
 
-    panic!("position command was empty")
+    eprintln!("cmd_position: position command was empty")
 }
 
 /// Play the game.
-fn cmd_go(
-    mut tokens: std::str::SplitWhitespace<'_>,
-    board: &mut Board,
-    cache: &mut TranspositionTable,
-) {
-    // interface-to-engine
-    let (tx1, rx) = channel();
-    let tx2 = tx1.clone();
+fn cmd_go(mut tokens: std::str::SplitWhitespace<'_>, state: &mut MainState) {
+    // hard timeout
+    let mut hard_ms = 15_000;
+    // soft timeout
+    let mut soft_ms = 1_650;
 
-    // can expect a 1sec soft timeout to result in more time than that of thinking
-    let mut timeout = 1650;
+    macro_rules! set_time {
+        () => {
+            if state.board.get_turn() == Color::White {
+                if let Some(time) = tokens.next() {
+                    if let Ok(time) = time.parse::<u64>() {
+                        let factor = if (time > 20_000) { 10 } else { 40 };
+                        hard_ms = min(time / factor, hard_ms);
+
+                        soft_ms = min(time / 50, soft_ms);
+                    }
+                }
+            }
+        };
+    }
 
     while let Some(token) = tokens.next() {
         match token {
             "wtime" => {
-                if board.get_turn() == Color::White {
-                    if let Some(time) = tokens.next() {
-                        if let Ok(time) = time.parse::<u64>() {
-                            timeout = min(time / 50, timeout);
-                        }
-                    }
-                }
+                set_time!()
             }
             "btime" => {
-                if board.get_turn() == Color::Black {
-                    if let Some(time) = tokens.next() {
-                        if let Ok(time) = time.parse::<u64>() {
-                            timeout = min(time / 50, timeout);
-                        }
-                    }
-                }
+                set_time!()
             }
             _ => ignore!(),
         }
     }
 
-    // timeout
-    thread::spawn(move || {
-        thread::sleep(Duration::from_millis(timeout));
-        let _ = tx2.send(InterfaceMsg::Stop);
-    });
+    let hard_limit = Instant::now() + Duration::from_millis(hard_ms);
+    let soft_limit = Instant::now() + Duration::from_millis(soft_ms);
 
-    let mut engine_state = EngineState::new(SearchConfig::default(), rx, cache);
-    let (line, eval) = best_line(board, &mut engine_state);
-
-    let chosen = line.last().copied();
-    println!(
-        "info pv{}",
-        line.iter()
-            .rev()
-            .map(|mv| mv.to_uci_algebraic())
-            .fold(String::new(), |a, b| a + " " + &b)
-    );
-    match eval {
-        SearchEval::Checkmate(n) => println!("info score mate {}", n / 2),
-        SearchEval::Centipawns(eval) => {
-            println!("info score cp {}", eval,)
-        }
-    }
-    match chosen {
-        Some(mv) => println!("bestmove {}", mv.to_uci_algebraic()),
-        None => println!("bestmove 0000"),
-    }
+    state
+        .tx_engine
+        .send(MsgToEngine::Go(Box::new(GoMessage {
+            board: state.board,
+            config: state.config,
+            time_lims: TimeLimits {
+                hard: None,
+                soft: Some(soft_limit),
+            },
+        })))
+        .unwrap();
 }
 
 /// Print static evaluation of the position.
-fn cmd_eval(mut _tokens: std::str::SplitWhitespace<'_>, board: &mut Board) {
-    let res = eval_metrics(board);
+fn cmd_eval(mut _tokens: std::str::SplitWhitespace<'_>, state: &mut MainState) {
+    let res = eval_metrics(&state.board);
     println!("STATIC EVAL (negative black, positive white):\n- pst: {}\n- king distance: {} ({} distance)\n- phase: {}\n- total: {}", res.pst_eval, res.king_distance_eval, res.king_distance, res.phase, res.total_eval);
 }
 
 /// Root UCI parser.
-fn cmd_root(mut tokens: std::str::SplitWhitespace<'_>, board: &mut Board, cache: &mut TranspositionTable) {
+fn cmd_root(mut tokens: std::str::SplitWhitespace<'_>, state: &mut MainState) {
     while let Some(token) = tokens.next() {
         match token {
             "uci" => {
@@ -321,21 +177,33 @@ fn cmd_root(mut tokens: std::str::SplitWhitespace<'_>, board: &mut Board, cache:
                 println!("readyok");
             }
             "ucinewgame" => {
-                *board = Board::starting_pos();
-                *cache = TranspositionTable::new(24);
+                if matches!(state.uci_mode.mode, UCIMode::Idle) {
+                    state.tx_engine.send(MsgToEngine::NewGame).unwrap();
+                    state.board = Board::starting_pos();
+                }
             }
             "quit" => {
-                return;
+                exit(0);
             }
             "position" => {
-                *board = cmd_position(tokens);
+                if matches!(state.uci_mode.mode, UCIMode::Idle) {
+                    cmd_position(tokens, state);
+                }
             }
             "go" => {
-                cmd_go(tokens, board, cache);
+                if state.uci_mode.transition(UCIModeTransition::Go).is_ok() {
+                    cmd_go(tokens, state);
+                }
+            }
+            "stop" => {
+                // actually setting state to stop happens when bestmove is received
+                if matches!(state.uci_mode.mode, UCIMode::Think | UCIMode::Ponder) {
+                    state.tx_engine.send(MsgToEngine::Stop).unwrap();
+                }
             }
             // non-standard command.
             "eval" => {
-                cmd_eval(tokens, board);
+                cmd_eval(tokens, state);
             }
             _ => ignore!(),
         }
@@ -344,51 +212,147 @@ fn cmd_root(mut tokens: std::str::SplitWhitespace<'_>, board: &mut Board, cache:
     }
 }
 
-/// Message (engine->main) to communicate the best move.
-struct MsgBestmove {
-    /// Best line (reversed stack; last element is best current move)
-    pv: Vec<Move>,
-    /// Evaluation of the position
-    eval: SearchEval,
+/// Format a bestmove.
+fn outp_bestmove(bestmove: MsgBestmove) {
+    let chosen = bestmove.pv.last().copied();
+    println!(
+        "info pv{}",
+        bestmove
+            .pv
+            .iter()
+            .rev()
+            .map(|mv| mv.to_uci_algebraic())
+            .fold(String::new(), |a, b| a + " " + &b)
+    );
+    match bestmove.eval {
+        SearchEval::Checkmate(n) => println!("info score mate {}", n / 2),
+        SearchEval::Centipawns(eval) => {
+            println!("info score cp {}", eval,)
+        }
+        SearchEval::Stopped => {
+            println!("info string ERROR: stopped search")
+        }
+    }
+    match chosen {
+        Some(mv) => println!("bestmove {}", mv.to_uci_algebraic()),
+        None => println!("bestmove 0000"),
+    }
 }
 
-/// Interface messages that may be received by main's channel.
-enum MsgToMain {
-    StdinLine(String),
-    Bestmove(MsgBestmove),
-}
-
-/// Read stdin line-by-line in a non-blocking way (in another thread)
+/// The "Stdin" thread to read stdin while avoiding blocking
 ///
 /// # Arguments
-/// - `tx`: channel write end to send lines to
-fn task_stdin_reader(tx: Sender<MsgToMain>) {
+/// - `tx_main`: channel write end to send lines to
+fn task_stdin_reader(tx_main: Sender<MsgToMain>) {
     thread::spawn(move || {
         let stdin = io::stdin();
 
         loop {
             let mut line = String::new();
             stdin.read_line(&mut line).unwrap();
-            tx.send(MsgToMain::StdinLine(line)).unwrap();
+            tx_main.send(MsgToMain::StdinLine(line)).unwrap();
         }
     });
 }
 
-fn main() {
-    let mut board = Board::starting_pos();
-    let mut transposition_table = TranspositionTable::new(24);
+/// The "Engine" thread that does all the computation.
+fn task_engine(tx_main: Sender<MsgToMain>, rx_engine: Receiver<MsgToEngine>) {
+    thread::spawn(move || {
+        let mut state = EngineState::new(
+            SearchConfig::default(),
+            rx_engine,
+            TranspositionTable::new(0),
+            TimeLimits::default(),
+        );
 
-    let (tx, rx) = channel();
-    task_stdin_reader(tx.clone());
+        loop {
+            let msg = state.rx_engine.recv().unwrap();
+            match msg {
+                MsgToEngine::Go(msg_box) => {
+                    let mut board = msg_box.board;
+                    state.config = msg_box.config;
+                    state.time_lims = msg_box.time_lims;
+                    let (pv, eval) = best_line(&mut board, &mut state);
+                    tx_main
+                        .send(MsgToMain::Bestmove(MsgBestmove { pv, eval }))
+                        .unwrap();
+                }
+                MsgToEngine::Stop => {
+                    // Main keeps track of state, so this should not happen.
+                    panic!("Received stop while idle.");
+                }
+                MsgToEngine::NewGame => {
+                    state.cache = TranspositionTable::new(state.config.transposition_size);
+                }
+            }
+        }
+    });
+}
+
+/// State contained within the main thread.
+///
+/// This struct helps pass around this thread state.
+struct MainState {
+    /// Channel to send messages to Engine.
+    tx_engine: Sender<MsgToEngine>,
+    /// Channel to receive messages from Engine and Stdin.
+    rx_main: Receiver<MsgToMain>,
+    /// Chessboard.
+    board: Board,
+    /// Engine configuration settings.
+    config: SearchConfig,
+    /// UCI mode state machine
+    uci_mode: UCIModeMachine,
+}
+
+impl MainState {
+    fn new(
+        tx_engine: Sender<MsgToEngine>,
+        rx_main: Receiver<MsgToMain>,
+        board: Board,
+        config: SearchConfig,
+        uci_mode: UCIModeMachine,
+    ) -> Self {
+        Self {
+            tx_engine,
+            rx_main,
+            board,
+            config,
+            uci_mode,
+        }
+    }
+}
+
+/// The "Main" thread.
+fn main() {
+    let (tx_main, rx_main) = channel();
+    task_stdin_reader(tx_main.clone());
+
+    let (tx_engine, rx_engine) = channel();
+    task_engine(tx_main, rx_engine);
+
+    let mut state = MainState::new(
+        tx_engine,
+        rx_main,
+        Board::starting_pos(),
+        SearchConfig::default(),
+        UCIModeMachine::default(),
+    );
 
     loop {
-        let msg = rx.recv().unwrap();
+        let msg = state.rx_main.recv().unwrap();
         match msg {
             MsgToMain::StdinLine(line) => {
                 let tokens = line.split_whitespace();
-                cmd_root(tokens, &mut board, &mut transposition_table);
+                cmd_root(tokens, &mut state);
             }
-            MsgToMain::Bestmove(msg_bestmove) => todo!(),
+            MsgToMain::Bestmove(msg_bestmove) => {
+                state
+                    .uci_mode
+                    .transition(UCIModeTransition::Bestmove)
+                    .unwrap();
+                outp_bestmove(msg_bestmove);
+            }
         }
     }
 }

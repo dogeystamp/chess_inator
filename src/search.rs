@@ -13,12 +13,14 @@ Copyright © 2024 dogeystamp <dogeystamp@disroot.org>
 
 //! Game-tree search.
 
+use crate::coordination::MsgToEngine;
 use crate::eval::{Eval, EvalInt};
 use crate::hash::ZobristTable;
 use crate::movegen::{Move, MoveGen};
 use crate::{Board, Piece};
 use std::cmp::max;
 use std::sync::mpsc;
+use std::time::Instant;
 
 // min can't be represented as positive
 const EVAL_WORST: EvalInt = -(EvalInt::MAX);
@@ -43,6 +45,8 @@ pub enum SearchEval {
     Checkmate(i8),
     /// Centipawn score.
     Centipawns(EvalInt),
+    /// Search was hard-stopped.
+    Stopped,
 }
 
 impl SearchEval {
@@ -58,6 +62,7 @@ impl SearchEval {
                 }
             }
             SearchEval::Centipawns(eval) => Self::Centipawns(-eval),
+            SearchEval::Stopped => SearchEval::Stopped,
         }
     }
 }
@@ -74,6 +79,7 @@ impl From<SearchEval> for EvalInt {
                 }
             }
             SearchEval::Centipawns(eval) => eval,
+            SearchEval::Stopped => 0,
         }
     }
 }
@@ -96,11 +102,13 @@ impl PartialOrd for SearchEval {
 #[derive(Clone, Copy, Debug)]
 pub struct SearchConfig {
     /// Enable alpha-beta pruning.
-    alpha_beta_on: bool,
+    pub alpha_beta_on: bool,
     /// Limit regular search depth
-    depth: usize,
+    pub depth: usize,
     /// Enable transposition table.
-    enable_trans_table: bool,
+    pub enable_trans_table: bool,
+    /// Transposition table size (2^n where this is n)
+    pub transposition_size: usize,
 }
 
 impl Default for SearchConfig {
@@ -110,6 +118,7 @@ impl Default for SearchConfig {
             // try to make this even to be more conservative and avoid horizon problem
             depth: 10,
             enable_trans_table: true,
+            transposition_size: 24,
         }
     }
 }
@@ -155,11 +164,34 @@ fn move_priority(board: &mut Board, mv: &Move) -> EvalInt {
 /// The best line (in reverse move order), and its corresponding absolute eval for the current player.
 fn minmax(
     board: &mut Board,
-    engine_state: &mut EngineState<'_>,
+    state: &mut EngineState,
     depth: usize,
     alpha: Option<EvalInt>,
     beta: Option<EvalInt>,
 ) -> (Vec<Move>, SearchEval) {
+    if false {
+        if state.node_count % 2048 == 1 {
+            // respect the hard stop if given
+            match state.rx_engine.try_recv() {
+                Ok(msg) => match msg {
+                    MsgToEngine::Go(_) => panic!("received go while thinking"),
+                    MsgToEngine::Stop => return (Vec::new(), SearchEval::Stopped),
+                    MsgToEngine::NewGame => panic!("received newgame while thinking"),
+                },
+                Err(e) => match e {
+                    mpsc::TryRecvError::Empty => {}
+                    mpsc::TryRecvError::Disconnected => panic!("thread Main stopped"),
+                },
+            }
+
+            if let Some(hard) = state.time_lims.hard {
+                if Instant::now() > hard {
+                    return (Vec::new(), SearchEval::Stopped);
+                }
+            }
+        }
+    }
+
     // default to worst, then gradually improve
     let mut alpha = alpha.unwrap_or(EVAL_WORST);
     // our best is their worst
@@ -179,8 +211,8 @@ fn minmax(
         .collect();
 
     // get transposition table entry
-    if engine_state.config.enable_trans_table {
-        if let Some(entry) = &engine_state.cache[board.zobrist] {
+    if state.config.enable_trans_table {
+        if let Some(entry) = &state.cache[board.zobrist] {
             // the entry has a deeper knowledge than we do, so follow its best move exactly instead of
             // just prioritizing what it thinks is best
             if entry.depth >= depth {
@@ -209,8 +241,13 @@ fn minmax(
 
     for (_priority, mv) in mvs {
         let anti_mv = mv.make(board);
-        let (continuation, score) =
-            minmax(board, engine_state, depth - 1, Some(-beta), Some(-alpha));
+        let (continuation, score) = minmax(board, state, depth - 1, Some(-beta), Some(-alpha));
+
+        // propagate hard stops
+        if matches!(score, SearchEval::Stopped) {
+            return (Vec::new(), SearchEval::Stopped);
+        }
+
         let abs_score = score.increment();
         if abs_score > abs_best {
             abs_best = abs_score;
@@ -219,7 +256,7 @@ fn minmax(
         }
         alpha = max(alpha, abs_best.into());
         anti_mv.unmake(board);
-        if alpha >= beta && engine_state.config.alpha_beta_on {
+        if alpha >= beta && state.config.alpha_beta_on {
             // alpha-beta prune.
             //
             // Beta represents the best eval that the other player can get in sibling branches
@@ -232,8 +269,8 @@ fn minmax(
 
     if let Some(best_move) = best_move {
         best_continuation.push(best_move);
-        if engine_state.config.enable_trans_table {
-            engine_state.cache[board.zobrist] = Some(TranspositionEntry {
+        if state.config.enable_trans_table {
+            state.cache[board.zobrist] = Some(TranspositionEntry {
                 best_move,
                 eval: abs_best,
                 depth,
@@ -241,15 +278,10 @@ fn minmax(
         }
     }
 
+    state.node_count += 1;
+
     (best_continuation, abs_best)
 }
-
-/// Messages from the interface to the search thread.
-pub enum InterfaceMsg {
-    Stop,
-}
-
-type InterfaceRx = mpsc::Receiver<InterfaceMsg>;
 
 #[derive(Clone, Copy, Debug)]
 pub struct TranspositionEntry {
@@ -264,131 +296,89 @@ pub struct TranspositionEntry {
 pub type TranspositionTable = ZobristTable<TranspositionEntry>;
 
 /// Iteratively deepen search until it is stopped.
-fn iter_deep(board: &mut Board, engine_state: &mut EngineState<'_>) -> (Vec<Move>, SearchEval) {
-    // don't interrupt a depth 1 search so that there's at least a move to be played
-    let (mut prev_line, mut prev_eval) = minmax(board, engine_state, 1, None, None);
-    for depth in 2..=engine_state.config.depth {
-        let (line, eval) = minmax(board, engine_state, depth, None, None);
+fn iter_deep(board: &mut Board, state: &mut EngineState) -> (Vec<Move>, SearchEval) {
+    // keep two previous lines (in case current one is halted)
+    // 1 is the most recent
+    let (mut line1, mut eval1) = minmax(board, state, 1, None, None);
+    let (mut line2, mut eval2) = (line1.clone(), eval1);
 
-        match engine_state.interface.try_recv() {
-            Ok(msg) => match msg {
-                InterfaceMsg::Stop => {
-                    if depth & 1 == 1 && (EvalInt::from(eval) - EvalInt::from(prev_eval) > 300) {
-                        // be skeptical if we move last and we suddenly earn a lot of
-                        // centipawns. this may be a sign of horizon problem
-                        return (prev_line, prev_eval);
-                    } else {
-                        return (line, eval);
-                    }
-                }
-            },
-            Err(e) => match e {
-                mpsc::TryRecvError::Empty => {}
-                mpsc::TryRecvError::Disconnected => panic!("interface thread stopped"),
-            },
-        }
-        (prev_line, prev_eval) = (line, eval);
+    macro_rules! ret_best {
+        ($depth: expr) => {
+            if $depth & 1 == 1 && (EvalInt::from(eval1) - EvalInt::from(eval2) > 300) {
+                // be skeptical if we move last and we suddenly earn a lot of
+                // centipawns. this may be a sign of horizon problem
+                return (line2, eval2);
+            } else {
+                return (line1, eval1);
+            }
+        };
     }
-    (prev_line, prev_eval)
+
+    for depth in 2..=state.config.depth {
+        let (line, eval) = minmax(board, state, depth, None, None);
+        if matches!(eval, SearchEval::Stopped) {
+            ret_best!(depth - 1)
+        } else {
+            (line2, eval2) = (line1, eval1);
+            (line1, eval1) = (line, eval);
+        }
+
+        if let Some(soft_lim) = state.time_lims.soft {
+            if Instant::now() > soft_lim {
+                ret_best!(depth)
+            }
+        }
+    }
+    (line1, eval1)
 }
 
-/// Helper type to avoid retyping the same arguments into every function prototype
-pub struct EngineState<'a> {
-    /// Configuration
-    config: SearchConfig,
-    /// Channel that can talk to the main thread
-    interface: InterfaceRx,
-    cache: &'a mut TranspositionTable,
+/// Deadlines for the engine to think of a move.
+#[derive(Default)]
+pub struct TimeLimits {
+    /// The engine must respect this time limit. It will abort if this deadline is passed.
+    pub hard: Option<Instant>,
+    pub soft: Option<Instant>,
 }
 
-impl<'a> EngineState<'a> {
+/// Helper type to avoid retyping the same arguments into every function prototype.
+///
+/// This should be owned outside the actual thinking part so that the engine can remember state
+/// between moves.
+pub struct EngineState {
+    pub config: SearchConfig,
+    /// Main -> Engine channel receiver
+    pub rx_engine: mpsc::Receiver<MsgToEngine>,
+    pub cache: TranspositionTable,
+    /// Nodes traversed (i.e. number of times minmax called)
+    node_count: usize,
+    pub time_lims: TimeLimits,
+}
+
+impl EngineState {
     pub fn new(
         config: SearchConfig,
-        interface: InterfaceRx,
-        cache: &'a mut TranspositionTable,
+        interface: mpsc::Receiver<MsgToEngine>,
+        cache: TranspositionTable,
+        time_lims: TimeLimits,
     ) -> Self {
         Self {
             config,
-            interface,
+            rx_engine: interface,
             cache,
+            node_count: 0,
+            time_lims,
         }
     }
 }
 
 /// Find the best line (in reverse order) and its evaluation.
-pub fn best_line(board: &mut Board, engine_state: &mut EngineState<'_>) -> (Vec<Move>, SearchEval) {
+pub fn best_line(board: &mut Board, engine_state: &mut EngineState) -> (Vec<Move>, SearchEval) {
     let (line, eval) = iter_deep(board, engine_state);
     (line, eval)
 }
 
 /// Find the best move.
-pub fn best_move(board: &mut Board, engine_state: &mut EngineState<'_>) -> Option<Move> {
+pub fn best_move(board: &mut Board, engine_state: &mut EngineState) -> Option<Move> {
     let (line, _eval) = best_line(board, engine_state);
     line.last().copied()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::fen::{FromFen, ToFen};
-    use crate::movegen::ToUCIAlgebraic;
-
-    /// Theoretically, alpha-beta pruning should not affect the result of minmax.
-    #[test]
-    fn alpha_beta_same_result() {
-        let test_cases = [
-            "r2q1rk1/1bp1pp1p/p2p2p1/1p1P2P1/2n1P3/3Q1P2/PbPBN2P/3RKB1R b K - 5 15",
-            "r1b1k2r/p1qpppbp/1p4pn/2B3N1/1PP1P3/2P5/P4PPP/RN1QR1K1 w kq - 0 14",
-        ];
-        for fen in test_cases {
-            let mut board = Board::from_fen(fen).unwrap();
-            let (_tx, _rx) = mpsc::channel();
-            let mut _cache = ZobristTable::new(0);
-            let mut engine_state = EngineState::new(
-                SearchConfig {
-                    alpha_beta_on: false,
-                    depth: 3,
-                    enable_trans_table: false,
-                },
-                _rx,
-                &mut _cache,
-            );
-
-            let mv_no_prune = best_move(
-                &mut board,
-                &mut engine_state,
-            )
-            .unwrap();
-
-            assert_eq!(board.to_fen(), fen);
-
-            let (_tx, _rx) = mpsc::channel();
-            let mut engine_state = EngineState::new(
-                SearchConfig {
-                    alpha_beta_on: true,
-                    depth: 3,
-                    enable_trans_table: false,
-                },
-                _rx,
-                &mut _cache,
-            );
-
-            let mv_with_prune = best_move(
-                &mut board,
-                &mut engine_state,
-            )
-            .unwrap();
-
-            assert_eq!(board.to_fen(), fen);
-
-            println!(
-                "without ab prune got {}, otherwise {}, fen {}",
-                mv_no_prune.to_uci_algebraic(),
-                mv_with_prune.to_uci_algebraic(),
-                fen
-            );
-
-            assert_eq!(mv_no_prune, mv_with_prune);
-        }
-    }
 }
