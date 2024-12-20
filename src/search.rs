@@ -40,8 +40,12 @@ mod test_eval_int {
 pub enum SearchEval {
     /// Mate in |n| - 1 half moves, negative for own mate.
     Checkmate(i8),
-    /// Centipawn score.
-    Centipawns(EvalInt),
+    /// Centipawn score (exact).
+    Exact(EvalInt),
+    /// Centipawn score (lower bound).
+    Lower(EvalInt),
+    /// Centipawn score (upper bound).
+    Upper(EvalInt),
     /// Search was hard-stopped.
     Stopped,
 }
@@ -58,7 +62,9 @@ impl SearchEval {
                     Self::Checkmate(-(n + 1))
                 }
             }
-            SearchEval::Centipawns(eval) => Self::Centipawns(-eval),
+            SearchEval::Exact(eval) => Self::Exact(-eval),
+            SearchEval::Lower(eval) => Self::Upper(-eval),
+            SearchEval::Upper(eval) => Self::Lower(-eval),
             SearchEval::Stopped => SearchEval::Stopped,
         }
     }
@@ -75,7 +81,9 @@ impl From<SearchEval> for EvalInt {
                     EVAL_BEST - EvalInt::from(n)
                 }
             }
-            SearchEval::Centipawns(eval) => eval,
+            SearchEval::Exact(eval) => eval,
+            SearchEval::Lower(eval) => eval,
+            SearchEval::Upper(eval) => eval,
             SearchEval::Stopped => panic!("Attempted to evaluate a halted search"),
         }
     }
@@ -197,7 +205,7 @@ fn minmax(
 
     if depth == 0 {
         let eval = board.eval() * EvalInt::from(board.turn.sign());
-        return (Vec::new(), SearchEval::Centipawns(eval));
+        return (Vec::new(), SearchEval::Exact(eval));
     }
 
     let mut mvs: Vec<_> = board
@@ -211,11 +219,11 @@ fn minmax(
     // get transposition table entry
     if state.config.enable_trans_table {
         if let Some(entry) = &state.cache[board.zobrist] {
-            // the entry has a deeper knowledge than we do, so follow its best move exactly instead of
-            // just prioritizing what it thinks is best
             if entry.depth >= depth {
-                // we don't save PV line in transposition table, so no information on that
-                return (vec![entry.best_move], entry.eval);
+                if let SearchEval::Exact(_) | SearchEval::Upper(_) = entry.eval {
+                    // no point looking for a better move
+                    return (vec![entry.best_move], entry.eval);
+                }
             }
             mvs.push((EVAL_BEST, entry.best_move));
         }
@@ -224,7 +232,7 @@ fn minmax(
     // sort moves by decreasing priority
     mvs.sort_unstable_by_key(|mv| -mv.0);
 
-    let mut abs_best = SearchEval::Centipawns(EVAL_WORST);
+    let mut abs_best = SearchEval::Exact(EVAL_WORST);
     let mut best_move: Option<Move> = None;
     let mut best_continuation: Vec<Move> = Vec::new();
 
@@ -233,7 +241,7 @@ fn minmax(
             return (Vec::new(), SearchEval::Checkmate(-1));
         } else {
             // stalemate
-            return (Vec::new(), SearchEval::Centipawns(0));
+            return (Vec::new(), SearchEval::Exact(0));
         }
     }
 
@@ -261,6 +269,9 @@ fn minmax(
             // (different moves in the parent node). Alpha > beta means the eval here is _worse_
             // for the other player, so they will never make the move that leads into this branch.
             // Therefore, we stop evaluating this branch at all.
+            if let SearchEval::Upper(eval) | SearchEval::Exact(eval) = abs_best {
+                abs_best = SearchEval::Lower(eval);
+            }
             break;
         }
     }
@@ -352,7 +363,7 @@ impl TimeLimits {
 
         // if we have more than 5 minutes, and we're out of the opening, we can afford to think longer
         if ourtime_ms > 300_000 && eval.phase <= 13 {
-            soft_ms = 3_000
+            soft_ms = 4_500
         }
 
         let factor = if ourtime_ms > 5_000 { 10 } else { 40 };

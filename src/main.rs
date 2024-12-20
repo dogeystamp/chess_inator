@@ -225,7 +225,7 @@ fn outp_bestmove(bestmove: MsgBestmove) {
     );
     match bestmove.eval {
         SearchEval::Checkmate(n) => println!("info score mate {}", n / 2),
-        SearchEval::Centipawns(eval) => {
+        SearchEval::Exact(eval) | SearchEval::Lower(eval) | SearchEval::Upper(eval) => {
             println!("info score cp {}", eval,)
         }
         SearchEval::Stopped => {
