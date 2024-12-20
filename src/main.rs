@@ -115,7 +115,7 @@ fn cmd_go(mut tokens: std::str::SplitWhitespace<'_>, state: &mut MainState) {
     // hard timeout
     let mut hard_ms = 15_000;
     // soft timeout
-    let mut soft_ms = 1_650;
+    let mut soft_ms = 1_200;
 
     macro_rules! set_time {
         () => {
@@ -258,10 +258,11 @@ fn task_stdin_reader(tx_main: Sender<MsgToMain>) {
 /// The "Engine" thread that does all the computation.
 fn task_engine(tx_main: Sender<MsgToMain>, rx_engine: Receiver<MsgToEngine>) {
     thread::spawn(move || {
+        let conf = SearchConfig::default();
         let mut state = EngineState::new(
-            SearchConfig::default(),
+            conf,
             rx_engine,
-            TranspositionTable::new(0),
+            TranspositionTable::new(conf.transposition_size),
             TimeLimits::default(),
         );
 

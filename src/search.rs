@@ -79,7 +79,7 @@ impl From<SearchEval> for EvalInt {
                 }
             }
             SearchEval::Centipawns(eval) => eval,
-            SearchEval::Stopped => 0,
+            SearchEval::Stopped => panic!("Attempted to evaluate a halted search"),
         }
     }
 }
@@ -169,28 +169,30 @@ fn minmax(
     alpha: Option<EvalInt>,
     beta: Option<EvalInt>,
 ) -> (Vec<Move>, SearchEval) {
-    if false {
-        if state.node_count % 2048 == 1 {
-            // respect the hard stop if given
-            match state.rx_engine.try_recv() {
-                Ok(msg) => match msg {
-                    MsgToEngine::Go(_) => panic!("received go while thinking"),
-                    MsgToEngine::Stop => return (Vec::new(), SearchEval::Stopped),
-                    MsgToEngine::NewGame => panic!("received newgame while thinking"),
-                },
-                Err(e) => match e {
-                    mpsc::TryRecvError::Empty => {}
-                    mpsc::TryRecvError::Disconnected => panic!("thread Main stopped"),
-                },
-            }
-
-            if let Some(hard) = state.time_lims.hard {
-                if Instant::now() > hard {
+    // these operations are relatively expensive, so only run them occasionally
+    if state.node_count % ((1 << 31) - 1) == 0 {
+        // respect the hard stop if given
+        match state.rx_engine.try_recv() {
+            Ok(msg) => match msg {
+                MsgToEngine::Go(_) => panic!("received go while thinking"),
+                MsgToEngine::Stop => {
                     return (Vec::new(), SearchEval::Stopped);
                 }
+                MsgToEngine::NewGame => panic!("received newgame while thinking"),
+            },
+            Err(e) => match e {
+                mpsc::TryRecvError::Empty => {}
+                mpsc::TryRecvError::Disconnected => panic!("thread Main stopped"),
+            },
+        }
+
+        if let Some(hard) = state.time_lims.hard {
+            if Instant::now() > hard {
+                return (Vec::new(), SearchEval::Stopped);
             }
         }
     }
+    state.node_count += 1;
 
     // default to worst, then gradually improve
     let mut alpha = alpha.unwrap_or(EVAL_WORST);
@@ -278,8 +280,6 @@ fn minmax(
         }
     }
 
-    state.node_count += 1;
-
     (best_continuation, abs_best)
 }
 
@@ -297,39 +297,26 @@ pub type TranspositionTable = ZobristTable<TranspositionEntry>;
 
 /// Iteratively deepen search until it is stopped.
 fn iter_deep(board: &mut Board, state: &mut EngineState) -> (Vec<Move>, SearchEval) {
-    // keep two previous lines (in case current one is halted)
-    // 1 is the most recent
-    let (mut line1, mut eval1) = minmax(board, state, 1, None, None);
-    let (mut line2, mut eval2) = (line1.clone(), eval1);
-
-    macro_rules! ret_best {
-        ($depth: expr) => {
-            if $depth & 1 == 1 && (EvalInt::from(eval1) - EvalInt::from(eval2) > 300) {
-                // be skeptical if we move last and we suddenly earn a lot of
-                // centipawns. this may be a sign of horizon problem
-                return (line2, eval2);
-            } else {
-                return (line1, eval1);
-            }
-        };
-    }
+    let (mut prev_line, mut prev_eval) = minmax(board, state, 1, None, None);
 
     for depth in 2..=state.config.depth {
         let (line, eval) = minmax(board, state, depth, None, None);
-        if matches!(eval, SearchEval::Stopped) {
-            ret_best!(depth - 1)
-        } else {
-            (line2, eval2) = (line1, eval1);
-            (line1, eval1) = (line, eval);
-        }
 
         if let Some(soft_lim) = state.time_lims.soft {
             if Instant::now() > soft_lim {
-                ret_best!(depth)
+                if depth & 1 == 1 && (EvalInt::from(eval) - EvalInt::from(prev_eval) > 300) {
+                    // be skeptical if we move last and we suddenly earn a lot of
+                    // centipawns. this may be a sign of horizon problem
+                    return (prev_line, prev_eval);
+                } else {
+                    return (line, eval);
+                }
             }
         }
+
+        (prev_line, prev_eval) = (line, eval);
     }
-    (line1, eval1)
+    (prev_line, prev_eval)
 }
 
 /// Deadlines for the engine to think of a move.
