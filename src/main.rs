@@ -34,12 +34,10 @@ Copyright © 2024 dogeystamp <dogeystamp@disroot.org>
 //!   "receive at Main" respectively. These names would be used for one channel.
 
 use chess_inator::prelude::*;
-use std::cmp::min;
 use std::io;
 use std::process::exit;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::thread;
-use std::time::{Duration, Instant};
 
 /// UCI protocol says to ignore any unknown words.
 ///
@@ -112,21 +110,14 @@ fn cmd_position(mut tokens: std::str::SplitWhitespace<'_>, state: &mut MainState
 
 /// Play the game.
 fn cmd_go(mut tokens: std::str::SplitWhitespace<'_>, state: &mut MainState) {
-    // hard timeout
-    let mut hard_ms = 100_000;
-    // soft timeout
-    let mut soft_ms = 1_200;
+    let mut wtime = 0;
+    let mut btime = 0;
 
     macro_rules! set_time {
-        () => {
-            if state.board.get_turn() == Color::White {
-                if let Some(time) = tokens.next() {
-                    if let Ok(time) = time.parse::<u64>() {
-                        let factor = if (time > 20_000) { 10 } else { 40 };
-                        hard_ms = min(time / factor, hard_ms);
-
-                        soft_ms = min(time / 50, soft_ms);
-                    }
+        ($color: expr, $var: ident) => {
+            if let Some(time) = tokens.next() {
+                if let Ok(time) = time.parse::<u64>() {
+                    $var = time;
                 }
             }
         };
@@ -135,27 +126,27 @@ fn cmd_go(mut tokens: std::str::SplitWhitespace<'_>, state: &mut MainState) {
     while let Some(token) = tokens.next() {
         match token {
             "wtime" => {
-                set_time!()
+                set_time!(Color::White, wtime)
             }
             "btime" => {
-                set_time!()
+                set_time!(Color::Black, btime)
             }
             _ => ignore!(),
         }
     }
 
-    let hard_limit = Instant::now() + Duration::from_millis(hard_ms);
-    let soft_limit = Instant::now() + Duration::from_millis(soft_ms);
+    let (ourtime_ms, theirtime_ms) = if state.board.get_turn() == Color::White {
+        (wtime, btime)
+    } else {
+        (btime, wtime)
+    };
 
     state
         .tx_engine
         .send(MsgToEngine::Go(Box::new(GoMessage {
             board: state.board,
             config: state.config,
-            time_lims: TimeLimits {
-                hard: None,
-                soft: Some(soft_limit),
-            },
+            time_lims: TimeLimits::from_ourtime_theirtime(ourtime_ms, theirtime_ms),
         })))
         .unwrap();
 }

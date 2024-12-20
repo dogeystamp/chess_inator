@@ -18,9 +18,9 @@ use crate::eval::{Eval, EvalInt};
 use crate::hash::ZobristTable;
 use crate::movegen::{Move, MoveGen};
 use crate::{Board, Piece};
-use std::cmp::max;
+use std::cmp::{max, min};
 use std::sync::mpsc;
-use std::time::Instant;
+use std::time::{Instant, Duration};
 
 // min can't be represented as positive
 const EVAL_WORST: EvalInt = -(EvalInt::MAX);
@@ -341,6 +341,28 @@ pub struct TimeLimits {
     /// The engine must respect this time limit. It will abort if this deadline is passed.
     pub hard: Option<Instant>,
     pub soft: Option<Instant>,
+}
+
+impl TimeLimits {
+    /// Make time limits based on wtime, btime (but color-independent).
+    pub fn from_ourtime_theirtime(ourtime_ms: u64, _theirtime_ms: u64) -> TimeLimits {
+        // hard timeout (max)
+        let mut hard_ms = 100_000;
+        // soft timeout (max)
+        let mut soft_ms = 1_200;
+
+        let factor = if ourtime_ms > 5_000 { 10 } else { 40 };
+        hard_ms = min(ourtime_ms / factor, hard_ms);
+        soft_ms = min(ourtime_ms / 50, soft_ms);
+
+        let hard_limit = Instant::now() + Duration::from_millis(hard_ms);
+        let soft_limit = Instant::now() + Duration::from_millis(soft_ms);
+
+        TimeLimits {
+            hard: Some(hard_limit),
+            soft: Some(soft_limit),
+        }
+    }
 }
 
 /// Helper type to avoid retyping the same arguments into every function prototype.
