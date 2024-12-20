@@ -13,11 +13,11 @@ Copyright © 2024 dogeystamp <dogeystamp@disroot.org>
 
 //! Game-tree search.
 
-use crate::prelude::*;
 use crate::hash::ZobristTable;
+use crate::prelude::*;
 use std::cmp::{max, min};
 use std::sync::mpsc;
-use std::time::{Instant, Duration};
+use std::time::{Duration, Instant};
 
 // min can't be represented as positive
 const EVAL_WORST: EvalInt = -(EvalInt::MAX);
@@ -128,14 +128,6 @@ impl Default for SearchConfig {
     }
 }
 
-/// If a move is a capture, return which piece is capturing what.
-fn move_get_capture(board: &mut Board, mv: &Move) -> Option<(Piece, Piece)> {
-    // TODO: en passant
-    board
-        .get_piece(mv.dest)
-        .map(|cap_pc| (board.get_piece(mv.src).unwrap().into(), cap_pc.into()))
-}
-
 /// Least valuable victim, most valuable attacker heuristic for captures.
 fn lvv_mva_eval(src_pc: Piece, cap_pc: Piece) -> EvalInt {
     let pc_values = [500, 300, 300, 20000, 900, 100];
@@ -143,13 +135,22 @@ fn lvv_mva_eval(src_pc: Piece, cap_pc: Piece) -> EvalInt {
 }
 
 /// Assign a priority to a move based on how promising it is.
-fn move_priority(board: &mut Board, mv: &Move) -> EvalInt {
+fn move_priority(board: &mut Board, mv: &Move, state: &mut EngineState) -> EvalInt {
     // move eval
     let mut eval: EvalInt = 0;
-    if let Some((src_pc, cap_pc)) = move_get_capture(board, mv) {
+    let src_pc = board.get_piece(mv.src).unwrap();
+    let anti_mv = mv.make(board);
+
+    if state.config.enable_trans_table {
+        if let Some(entry) = &state.cache[board.zobrist] {
+            eval = entry.eval.into();
+        }
+    } else if let Some(cap_pc) = anti_mv.cap {
         // least valuable victim, most valuable attacker
-        eval += lvv_mva_eval(src_pc, cap_pc)
+        eval += lvv_mva_eval(src_pc.into(), cap_pc)
     }
+
+    anti_mv.unmake(board);
 
     eval
 }
@@ -213,7 +214,7 @@ fn minmax(
         .into_iter()
         .collect::<Vec<_>>()
         .into_iter()
-        .map(|mv| (move_priority(board, &mv), mv))
+        .map(|mv| (move_priority(board, &mv, state), mv))
         .collect();
 
     // get transposition table entry
@@ -355,7 +356,11 @@ impl TimeLimits {
     /// Make time limits based on wtime, btime (but color-independent).
     ///
     /// Also takes in eval metrics, for instance to avoid wasting too much time in the opening.
-    pub fn from_ourtime_theirtime(ourtime_ms: u64, _theirtime_ms: u64, eval: EvalMetrics) -> TimeLimits {
+    pub fn from_ourtime_theirtime(
+        ourtime_ms: u64,
+        _theirtime_ms: u64,
+        eval: EvalMetrics,
+    ) -> TimeLimits {
         // hard timeout (max)
         let mut hard_ms = 100_000;
         // soft timeout (max)
