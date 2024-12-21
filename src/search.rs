@@ -110,6 +110,8 @@ pub struct SearchConfig {
     pub alpha_beta_on: bool,
     /// Limit regular search depth
     pub depth: usize,
+    /// Limit quiescence search depth
+    pub qdepth: usize,
     /// Enable transposition table.
     pub enable_trans_table: bool,
     /// Transposition table size (2^n where this is n)
@@ -122,6 +124,7 @@ impl Default for SearchConfig {
             alpha_beta_on: true,
             // try to make this even to be more conservative and avoid horizon problem
             depth: 10,
+            qdepth: 6,
             enable_trans_table: true,
             transposition_size: 24,
         }
@@ -155,26 +158,35 @@ fn move_priority(board: &mut Board, mv: &Move, state: &mut EngineState) -> EvalI
     eval
 }
 
+/// State specifically for a minmax call.
+struct MinmaxState {
+    /// how many plies left to search in this call
+    depth: usize,
+    /// best score (absolute, from current player perspective) guaranteed for current player.
+    alpha: Option<EvalInt>,
+    /// best score (absolute, from current player perspective) guaranteed for other player.
+    beta: Option<EvalInt>,
+    /// quiescence search flag
+    quiesce: bool,
+    /// how recently (plies) in quiescence search was there check
+    was_qcheck: u8,
+}
+
 /// Search the game tree to find the absolute (positive good) move and corresponding eval for the
 /// current player.
+///
+/// This also integrates quiescence search, which looks for a calm (quiescent) position where
+/// there are no recaptures, no checks.
 ///
 /// # Arguments
 ///
 /// * board: board position to analyze.
 /// * depth: how deep to analyze the game tree.
-/// * alpha: best score (absolute, from current player perspective) guaranteed for current player.
-/// * beta: best score (absolute, from current player perspective) guaranteed for other player.
 ///
 /// # Returns
 ///
 /// The best line (in reverse move order), and its corresponding absolute eval for the current player.
-fn minmax(
-    board: &mut Board,
-    state: &mut EngineState,
-    depth: usize,
-    alpha: Option<EvalInt>,
-    beta: Option<EvalInt>,
-) -> (Vec<Move>, SearchEval) {
+fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Vec<Move>, SearchEval) {
     // these operations are relatively expensive, so only run them occasionally
     if state.node_count % (1 << 16) == 0 {
         // respect the hard stop if given
@@ -199,15 +211,36 @@ fn minmax(
         }
     }
 
-    // default to worst, then gradually improve
-    let mut alpha = alpha.unwrap_or(EVAL_WORST);
-    // our best is their worst
-    let beta = beta.unwrap_or(EVAL_BEST);
-
-    if depth == 0 {
-        let eval = board.eval() * EvalInt::from(board.turn.sign());
-        return (Vec::new(), SearchEval::Exact(eval));
+    // only determine if in check during qsearch
+    let mut is_in_qcheck: bool = false;
+    if mm.quiesce || mm.depth == 0 {
+        is_in_qcheck = board.is_check(board.turn);
     }
+    let is_in_qcheck = is_in_qcheck;
+
+    if mm.depth == 0 {
+        if mm.quiesce {
+            let eval = board.eval() * EvalInt::from(board.turn.sign());
+            return (Vec::new(), SearchEval::Exact(eval));
+        } else {
+            return minmax(
+                board,
+                state,
+                MinmaxState {
+                    depth: state.config.qdepth,
+                    alpha: mm.alpha,
+                    beta: mm.beta,
+                    quiesce: true,
+                    was_qcheck: mm.was_qcheck,
+                },
+            );
+        }
+    }
+
+    // default to worst, then gradually improve
+    let mut alpha = mm.alpha.unwrap_or(EVAL_WORST);
+    // our best is their worst
+    let beta = mm.beta.unwrap_or(EVAL_BEST);
 
     let mut mvs: Vec<_> = board
         .gen_moves()
@@ -220,7 +253,7 @@ fn minmax(
     // get transposition table entry
     if state.config.enable_trans_table {
         if let Some(entry) = &state.cache[board.zobrist] {
-            if entry.depth >= depth {
+            if entry.depth >= mm.depth {
                 if let SearchEval::Exact(_) | SearchEval::Upper(_) = entry.eval {
                     // no point looking for a better move
                     return (vec![entry.best_move], entry.eval);
@@ -237,18 +270,58 @@ fn minmax(
     let mut best_move: Option<Move> = None;
     let mut best_continuation: Vec<Move> = Vec::new();
 
-    if mvs.is_empty() {
-        if board.is_check(board.turn) {
+    let n_non_qmoves = mvs.len();
+
+    // determine moves are allowed in quiescence
+    if mm.quiesce {
+        mvs.retain(|(_priority, mv): &(EvalInt, Move)| -> bool {
+            if let Some(recap_sq) = board.recap_sq {
+                if mv.dest == recap_sq {
+                    //return true;
+                }
+            }
+
+            // allow responding to checks, and giving check again
+            if mm.was_qcheck <= 2 || is_in_qcheck {
+                return true;
+            }
+
+            false
+        });
+    }
+
+    if n_non_qmoves == 0 {
+        let is_in_check = if mm.quiesce {
+            is_in_qcheck
+        } else {
+            board.is_check(board.turn)
+        };
+
+        if is_in_check {
             return (Vec::new(), SearchEval::Checkmate(-1));
         } else {
             // stalemate
             return (Vec::new(), SearchEval::Exact(0));
         }
+    } else if mvs.is_empty() {
+        // pruned all the moves due to quiescence
+        let eval = board.eval() * EvalInt::from(board.turn.sign());
+        return (Vec::new(), SearchEval::Exact(eval));
     }
 
     for (_priority, mv) in mvs {
         let anti_mv = mv.make(board);
-        let (continuation, score) = minmax(board, state, depth - 1, Some(-beta), Some(-alpha));
+        let (continuation, score) = minmax(
+            board,
+            state,
+            MinmaxState {
+                depth: mm.depth - 1,
+                alpha: Some(-beta),
+                beta: Some(-alpha),
+                quiesce: mm.quiesce,
+                was_qcheck: if is_in_qcheck { 1 } else { mm.was_qcheck + 1 },
+            },
+        );
 
         // propagate hard stops
         if matches!(score, SearchEval::Stopped) {
@@ -279,11 +352,11 @@ fn minmax(
 
     if let Some(best_move) = best_move {
         best_continuation.push(best_move);
-        if state.config.enable_trans_table {
+        if state.config.enable_trans_table && !mm.quiesce {
             state.cache[board.zobrist] = Some(TranspositionEntry {
                 best_move,
                 eval: abs_best,
-                depth,
+                depth: mm.depth,
             });
         }
     }
@@ -306,42 +379,43 @@ pub type TranspositionTable = ZobristTable<TranspositionEntry>;
 
 /// Iteratively deepen search until it is stopped.
 fn iter_deep(board: &mut Board, state: &mut EngineState) -> (Vec<Move>, SearchEval) {
-    // always preserve two lines (1 is most recent)
-    let (mut line1, mut eval1) = minmax(board, state, 1, None, None);
-    let (mut line2, mut eval2) = (line1.clone(), eval1);
+    let (mut prev_line, mut prev_eval) = minmax(
+        board,
+        state,
+        MinmaxState {
+            depth: 1,
+            alpha: None,
+            beta: None,
+            quiesce: false,
+            was_qcheck: 5,
+        },
+    );
 
     for depth in 2..=state.config.depth {
-        let (line, eval) = minmax(board, state, depth, None, None);
-
-        let mut have_to_ret = false;
-        // depth of the line we're about to return.
-        // our knock-off "quiescence" is skeptical of odd depths, so we need to know this.
-        let mut ret_depth = depth;
+        let (line, eval) = minmax(
+            board,
+            state,
+            MinmaxState {
+                depth,
+                alpha: None,
+                beta: None,
+                quiesce: false,
+                was_qcheck: 5,
+            },
+        );
 
         if matches!(eval, SearchEval::Stopped) {
-            ret_depth -= 1;
-            have_to_ret = true;
+            return (prev_line, prev_eval);
         } else {
-            (line2, eval2) = (line1, eval1);
-            (line1, eval1) = (line, eval);
             if let Some(soft_lim) = state.time_lims.soft {
                 if Instant::now() > soft_lim {
-                    have_to_ret = true;
+                    return (line, eval);
                 }
             }
-        }
-
-        if have_to_ret {
-            if ret_depth & 1 == 1 && (EvalInt::from(eval1) - EvalInt::from(eval2) > 300) {
-                // be skeptical if we move last and we suddenly earn a lot of
-                // centipawns. this may be a sign of horizon problem
-                return (line2, eval2);
-            } else {
-                return (line1, eval1);
-            }
+            (prev_line, prev_eval) = (line, eval);
         }
     }
-    (line1, eval1)
+    (prev_line, prev_eval)
 }
 
 /// Deadlines for the engine to think of a move.

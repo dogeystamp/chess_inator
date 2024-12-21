@@ -466,6 +466,9 @@ pub struct Board {
 
     /// Hash state to incrementally update.
     zobrist: Zobrist,
+
+    /// Last captured square
+    recap_sq: Option<Square>,
 }
 
 impl Board {
@@ -541,6 +544,7 @@ impl Board {
             castle: CastleRights(self.castle.0),
             eval: Default::default(),
             zobrist: Zobrist::default(),
+            recap_sq: self.recap_sq.map(|sq| sq.mirror_vert()),
         };
 
         new_board.castle.0.reverse();

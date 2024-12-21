@@ -93,6 +93,8 @@ pub struct AntiMove {
     castle: CastleRights,
     /// En passant target square prior to this move.
     ep_square: Option<Square>,
+    /// En passant target square prior to this move.
+    recap_sq: Option<Square>,
 }
 
 impl AntiMove {
@@ -104,6 +106,7 @@ impl AntiMove {
         pos.half_moves = self.half_moves;
         pos.castle = self.castle;
         pos.ep_square = self.ep_square;
+        pos.recap_sq = self.recap_sq;
 
         /// Restore captured piece at a given square.
         macro_rules! cap_sq {
@@ -182,6 +185,7 @@ impl Move {
             half_moves: pos.half_moves,
             castle: pos.castle,
             ep_square: pos.ep_square,
+            recap_sq: pos.recap_sq,
         };
 
         // undo hashes (we will update them at the end of this function)
@@ -190,6 +194,9 @@ impl Move {
         // reset en passant
         let ep_square = pos.ep_square;
         pos.ep_square = None;
+
+        // reset recapture square
+        pos.recap_sq = None;
 
         if pos.turn == Color::Black {
             pos.full_moves += 1;
@@ -235,6 +242,9 @@ impl Move {
                         col: pc_src.col,
                     },
                 );
+                if cap_pc.is_some() {
+                    pos.recap_sq = Some(self.dest);
+                }
                 anti_move.cap = cap_pc.map(|pc| pc.pc);
             }
             MoveType::Normal => {
@@ -243,6 +253,9 @@ impl Move {
 
                 let pc_dest: Option<ColPiece> = pos.get_piece(self.dest);
                 anti_move.cap = pc_dest.map(|pc| pc.pc);
+                if pc_dest.is_some() {
+                    pos.recap_sq = Some(self.dest);
+                }
 
                 let (src_row, src_col) = self.src.to_row_col_signed();
                 let (dest_row, dest_col) = self.dest.to_row_col_signed();
@@ -1430,5 +1443,16 @@ mod tests {
             let mv = Move::from_uci_algebraic(tc).unwrap();
             assert_eq!(mv.to_uci_algebraic(), tc);
         }
+    }
+
+    #[test]
+    fn test_recap_sq() {
+        let mut board = Board::from_fen("R1b2r1k/6pp/2pqQ3/2n2P2/5P1b/1rN1Pp2/1P5P/2B2KNR b - - 1 22").unwrap();
+        let mv = Move::from_uci_algebraic("c8e6").unwrap();
+        let anti_mv = mv.make(&mut board);
+        let dest_sq: Square = "e6".parse().unwrap();
+        assert_eq!(board.recap_sq, Some(dest_sq));
+        anti_mv.unmake(&mut board);
+        assert_eq!(board.recap_sq, None);
     }
 }
