@@ -138,17 +138,13 @@ fn lvv_mva_eval(src_pc: Piece, cap_pc: Piece) -> EvalInt {
 }
 
 /// Assign a priority to a move based on how promising it is.
-fn move_priority(board: &mut Board, mv: &Move, state: &mut EngineState) -> EvalInt {
+fn move_priority(board: &mut Board, mv: &Move) -> EvalInt {
     // move eval
     let mut eval: EvalInt = 0;
     let src_pc = board.get_piece(mv.src).unwrap();
     let anti_mv = mv.make(board);
 
-    if state.config.enable_trans_table {
-        if let Some(entry) = &state.cache[board.zobrist] {
-            eval = entry.eval.into();
-        }
-    } else if let Some(cap_pc) = anti_mv.cap {
+    if let Some(cap_pc) = anti_mv.cap {
         // least valuable victim, most valuable attacker
         eval += lvv_mva_eval(src_pc.into(), cap_pc)
     }
@@ -239,19 +235,15 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Vec<M
         .into_iter()
         .collect::<Vec<_>>()
         .into_iter()
-        .map(|mv| (move_priority(board, &mv, state), mv))
+        .map(|mv| (move_priority(board, &mv), mv))
         .collect();
 
     // get transposition table entry
     if state.config.enable_trans_table {
         if let Some(entry) = &state.cache[board.zobrist] {
-            if entry.is_qsearch == mm.quiesce && entry.depth >= mm.depth {
-                if let SearchEval::Exact(_) | SearchEval::Upper(_) = entry.eval {
-                    // no point looking for a better move
-                    return (vec![entry.best_move], entry.eval);
-                }
+            if (entry.depth & 0x80 > 0) == mm.quiesce && (entry.depth & !0x80) >= (mm.depth as u8) {
+                mvs.push((EVAL_BEST, entry.best_mv))
             }
-            mvs.push((EVAL_BEST, entry.best_move));
         }
     }
 
@@ -336,10 +328,8 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Vec<M
         best_continuation.push(best_move);
         if state.config.enable_trans_table {
             state.cache[board.zobrist] = Some(TranspositionEntry {
-                best_move,
-                eval: abs_best,
-                depth: mm.depth,
-                is_qsearch: mm.quiesce,
+                best_mv: best_move,
+                depth: mm.depth as u8 | ((mm.quiesce as u8) << 7),
             });
         }
     }
@@ -350,14 +340,12 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Vec<M
 
 #[derive(Clone, Copy, Debug)]
 pub struct TranspositionEntry {
-    /// best move found last time
-    best_move: Move,
-    /// last time's eval
-    eval: SearchEval,
     /// depth of this entry
-    depth: usize,
-    /// is this score within the context of quiescence
-    is_qsearch: bool,
+    ///
+    /// most significant bit marks if this is qsearch or not
+    depth: u8,
+    /// last time's best move
+    best_mv: Move,
 }
 
 pub type TranspositionTable = ZobristTable<TranspositionEntry>;
