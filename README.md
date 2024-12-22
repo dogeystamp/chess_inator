@@ -1,3 +1,10 @@
+Branch: small transposition table entries
+
+Seemingly, having smaller transposition table entries could increase performance.
+But actually, looking at the length of the PV is misleading because transposition table hits may cut the PV short.
+
+
+
 # chess-inator
 
 A chess engine.
