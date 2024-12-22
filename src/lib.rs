@@ -29,6 +29,7 @@ pub mod prelude;
 
 use crate::fen::{FromFen, ToFen, START_POSITION};
 use crate::hash::Zobrist;
+use crate::movegen::GenAttackers;
 use eval::eval_score::EvalScores;
 
 pub const BOARD_WIDTH: usize = 8;
@@ -45,13 +46,13 @@ pub const N_COLORS: usize = 2;
 
 impl Color {
     /// Return opposite color (does not assign).
-    pub fn flip(self) -> Self {
+    pub const fn flip(self) -> Self {
         match self {
             Color::White => Color::Black,
             Color::Black => Color::White,
         }
     }
-    pub fn sign(&self) -> i8 {
+    pub const fn sign(&self) -> i8 {
         match self {
             Color::White => 1,
             Color::Black => -1,
@@ -78,6 +79,21 @@ pub enum Piece {
     Pawn,
 }
 pub const N_PIECES: usize = 6;
+
+impl Piece {
+    /// Get a piece's base value.
+    pub const fn value(&self) -> crate::eval::EvalInt {
+        use Piece::*;
+        (match self {
+            Rook => 6,
+            Bishop => 3,
+            Knight => 3,
+            King => 200,
+            Queen => 9,
+            Pawn => 1,
+        }) * 100
+    }
+}
 
 pub struct PieceErr;
 
@@ -482,6 +498,16 @@ impl Board {
         (0..N_SQUARES).map(Square::try_from).map(|x| x.unwrap())
     }
 
+    /// Get the 8th rank from a given player's perspective.
+    ///
+    /// Useful for promotions.
+    pub fn last_rank(pl: Color) -> usize {
+        match pl {
+            Color::White => usize::from(BOARD_HEIGHT) - 1,
+            Color::Black => 0,
+        }
+    }
+
     /// Create a new piece in a location, and pop any existing piece in the destination.
     pub fn set_piece(&mut self, sq: Square, pc: ColPiece) -> Option<ColPiece> {
         let dest_pc = self.del_piece(sq);
@@ -563,47 +589,13 @@ impl Board {
     /// Is a given player in check?
     pub fn is_check(&self, pl: Color) -> bool {
         for src in self[pl][Piece::King] {
-            macro_rules! detect_checker {
-                ($dirs: ident, $pc: pat, $keep_going: expr) => {
-                    for dir in $dirs.into_iter() {
-                        let (mut r, mut c) = src.to_row_col_signed();
-                        loop {
-                            let (nr, nc) = (r + dir.0, c + dir.1);
-                            if let Ok(sq) = Square::from_row_col_signed(nr, nc) {
-                                if let Some(pc) = self.get_piece(sq) {
-                                    if matches!(pc.pc, $pc) && pc.col != pl {
-                                        return true;
-                                    } else {
-                                        break;
-                                    }
-                                }
-                            } else {
-                                break;
-                            }
-                            if (!($keep_going)) {
-                                break;
-                            }
-                            r = nr;
-                            c = nc;
-                        }
-                    }
-                };
-            }
-
-            let dirs_white_pawn = [(-1, 1), (-1, -1)];
-            let dirs_black_pawn = [(1, 1), (1, -1)];
-
-            use Piece::*;
-
-            use movegen::{DIRS_DIAG, DIRS_KNIGHT, DIRS_STAR, DIRS_STRAIGHT};
-
-            detect_checker!(DIRS_DIAG, Bishop | Queen, true);
-            detect_checker!(DIRS_STRAIGHT, Rook | Queen, true);
-            detect_checker!(DIRS_STAR, King, false);
-            detect_checker!(DIRS_KNIGHT, Knight, false);
-            match pl {
-                Color::White => detect_checker!(dirs_black_pawn, Pawn, false),
-                Color::Black => detect_checker!(dirs_white_pawn, Pawn, false),
+            if self
+                .gen_attackers(src, true, Some(pl.flip()))
+                .into_iter()
+                .next()
+                .is_some()
+            {
+                return true;
             }
         }
         false

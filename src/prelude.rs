@@ -13,9 +13,15 @@ Copyright © 2024 dogeystamp <dogeystamp@disroot.org>
 
 //! Prelude that you can import entirely to use the library conveniently.
 
-pub use crate::eval::{eval_metrics, EvalMetrics, EvalInt, Eval};
+pub use crate::coordination::{
+    GoMessage, MsgBestmove, MsgToEngine, MsgToMain, UCIMode, UCIModeMachine, UCIModeTransition,
+};
+pub use crate::eval::{eval_metrics, Eval, EvalInt, EvalMetrics};
 pub use crate::fen::{FromFen, ToFen};
-pub use crate::movegen::{FromUCIAlgebraic, Move, MoveGen, ToUCIAlgebraic};
-pub use crate::search::{best_line, best_move, SearchEval, TranspositionTable, EngineState, SearchConfig, TimeLimits};
-pub use crate::{Board, Color, BOARD_HEIGHT, BOARD_WIDTH, N_COLORS, N_PIECES, N_SQUARES, ColPiece, Piece};
-pub use crate::coordination::{UCIMode, UCIModeTransition, UCIModeMachine, MsgBestmove, MsgToMain, MsgToEngine, GoMessage};
+pub use crate::movegen::{FromUCIAlgebraic, GenAttackers, Move, MoveGen, ToUCIAlgebraic};
+pub use crate::search::{
+    best_line, best_move, EngineState, SearchConfig, SearchEval, TimeLimits, TranspositionTable,
+};
+pub use crate::{
+    Board, ColPiece, Color, Piece, BOARD_HEIGHT, BOARD_WIDTH, N_COLORS, N_PIECES, N_SQUARES, Square,
+};

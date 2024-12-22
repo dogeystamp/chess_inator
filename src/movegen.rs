@@ -454,6 +454,134 @@ impl ToUCIAlgebraic for Move {
     }
 }
 
+pub trait GenAttackers {
+    /// Generate attackers/attacks for a given square.
+    ///
+    /// # Arguments
+    ///
+    /// * `dest`: Square that is attacked.
+    /// * `single`: Exit early if any attack is found.
+    /// * `filter_color`: Matches only attackers of this color, if given.
+    fn gen_attackers(
+        &self,
+        dest: Square,
+        single: bool,
+        filter_color: Option<Color>,
+    ) -> impl IntoIterator<Item = (ColPiece, Move)>;
+}
+
+impl GenAttackers for Board {
+    fn gen_attackers(
+        &self,
+        dest: Square,
+        single: bool,
+        filter_color: Option<Color>,
+    ) -> impl IntoIterator<Item = (ColPiece, Move)> {
+        let mut ret: Vec<(ColPiece, Move)> = Vec::new();
+
+        /// Filter attackers and add them to the return vector.
+        ///
+        /// Returns true if attacker was added.
+        fn push_ans(
+            pc: ColPiece,
+            sq: Square,
+            dest: Square,
+            ret: &mut Vec<(ColPiece, Move)>,
+            filter_color: Option<Color>,
+        ) -> bool {
+            if let Some(filter_color) = filter_color {
+                if filter_color != pc.col {
+                    return false;
+                }
+            }
+            let (r, _c) = dest.to_row_col();
+            let is_promotion = matches!(pc.pc, Piece::Pawn) && r == Board::last_rank(pc.col);
+
+            if is_promotion {
+                use PromotePiece::*;
+                for prom_pc in [Queen, Knight, Rook, Bishop] {
+                    ret.push((
+                        pc,
+                        Move {
+                            src: sq,
+                            dest,
+                            move_type: MoveType::Promotion(prom_pc),
+                        },
+                    ));
+                }
+            } else {
+                ret.push((
+                    pc,
+                    Move {
+                        src: sq,
+                        dest,
+                        move_type: MoveType::Normal,
+                    },
+                ));
+            }
+
+            true
+        }
+
+        macro_rules! detect_checker {
+            ($dirs: ident, $pc: pat, $color: pat, $keep_going: expr) => {
+                for dir in $dirs.into_iter() {
+                    let (mut r, mut c) = dest.to_row_col_signed();
+                    loop {
+                        let (nr, nc) = (r + dir.0, c + dir.1);
+                        if let Ok(sq) = Square::from_row_col_signed(nr, nc) {
+                            if let Some(pc) = self.get_piece(sq) {
+                                if matches!(pc.pc, $pc) && matches!(pc.col, $color) {
+                                    let added = push_ans(pc, sq, dest, &mut ret, filter_color);
+                                    if single && added {
+                                        return ret;
+                                    }
+                                }
+                                break;
+                            }
+                        } else {
+                            break;
+                        }
+                        if (!($keep_going)) {
+                            break;
+                        }
+                        r = nr;
+                        c = nc;
+                    }
+                }
+            };
+        }
+
+        // inverted because our perspective is from the attacked square
+        let dirs_white_pawn = [(-1, 1), (-1, -1)];
+        let dirs_black_pawn = [(1, 1), (1, -1)];
+
+        use Piece::*;
+
+        macro_rules! both {
+            () => {
+                Color::White | Color::Black
+            };
+        }
+
+        detect_checker!(DIRS_DIAG, Bishop | Queen, both!(), true);
+        detect_checker!(DIRS_STRAIGHT, Rook | Queen, both!(), true);
+        // this shouldn't happen in legal chess but we're using this function in a pseudo-legal
+        // move gen context
+        detect_checker!(DIRS_STAR, King, both!(), false);
+        detect_checker!(DIRS_KNIGHT, Knight, both!(), false);
+
+        if filter_color.is_none_or(|c| matches!(c, Color::Black)) {
+            detect_checker!(dirs_black_pawn, Pawn, Color::Black, false);
+        }
+        if filter_color.is_none_or(|c| matches!(c, Color::White)) {
+            detect_checker!(dirs_white_pawn, Pawn, Color::White, false);
+        }
+
+        ret
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 enum MoveGenType {
     /// Legal move generation.
@@ -561,6 +689,7 @@ fn move_slider(
         }
     }
 }
+
 fn is_legal(board: &mut Board, mv: Move) -> bool {
     // mut required for check checking
     // disallow friendly fire
@@ -678,10 +807,7 @@ impl MoveGenInternal for Board {
         for src in squares!(Pawn) {
             let (r, c) = src.to_row_col_signed();
 
-            let last_row = match self.turn {
-                Color::White => isize::try_from(BOARD_HEIGHT).unwrap() - 1,
-                Color::Black => 0,
-            };
+            let last_row = isize::try_from(Board::last_rank(self.turn)).unwrap();
 
             let nr = r + isize::from(self.turn.sign());
             let is_promotion = nr == last_row;
@@ -763,10 +889,11 @@ impl MoveGenInternal for Board {
                 }
             }
         }
-        ret.into_iter().filter(move |mv| match gen_type {
+        ret.retain(move |mv| match gen_type {
             MoveGenType::Legal => is_legal(self, *mv),
             MoveGenType::_Pseudo => true,
-        })
+        });
+        ret
     }
 }
 
@@ -1156,6 +1283,18 @@ mod tests {
         let all_cases = check_cases.iter().chain(&not_check_cases);
         for (fen, expected) in all_cases {
             let board = Board::from_fen(fen).unwrap();
+            eprintln!(
+                "got attackers {:?} for {}",
+                board
+                    .gen_attackers(
+                        board[Color::White][Piece::King].into_iter().next().unwrap(),
+                        false,
+                        Some(Color::Black)
+                    )
+                    .into_iter()
+                    .collect::<Vec<_>>(),
+                fen
+            );
             assert_eq!(board.is_check(Color::White), *expected, "failed on {}", fen);
 
             let board_anti = board.flip_colors();
@@ -1429,6 +1568,40 @@ mod tests {
         for tc in test_cases {
             let mv = Move::from_uci_algebraic(tc).unwrap();
             assert_eq!(mv.to_uci_algebraic(), tc);
+        }
+    }
+
+    #[test]
+    fn test_gen_attackers() {
+        let test_cases = [(
+            // fen
+            "3q4/3rn3/3r2b1/3rb3/rnpkbN2/2qKK2r/1nPPpN2/2rr4 w - - 0 1",
+            // attacked square
+            "d3",
+            // expected results
+            "c3 c2 e3 b4 d4 e4 f2 f4 c4 b2",
+        )];
+
+        for (fen, attacked, expected) in test_cases {
+            let mut expected = expected
+                .split_whitespace()
+                .map(str::parse::<Square>)
+                .map(|x| x.expect("test case has invalid square"))
+                .collect::<Vec<_>>();
+            expected.sort();
+
+            let attacked = attacked.parse::<Square>().unwrap();
+
+            let board = Board::from_fen(fen).unwrap();
+
+            let mut attackers = board
+                .gen_attackers(attacked, false, None)
+                .into_iter()
+                .map(|(_pc, mv)| mv.src)
+                .collect::<Vec<_>>();
+            attackers.sort();
+
+            assert_eq!(attackers, expected);
         }
     }
 }

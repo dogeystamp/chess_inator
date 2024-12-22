@@ -13,7 +13,7 @@ Copyright © 2024 dogeystamp <dogeystamp@disroot.org>
 
 //! Position evaluation.
 
-use crate::{Board, Color, Piece, Square, N_COLORS, N_PIECES, N_SQUARES};
+use crate::prelude::*;
 use core::cmp::{max, min};
 use core::ops::Index;
 
@@ -27,6 +27,23 @@ pub trait Eval {
     ///
     /// Negative for Black advantage and positive for White.
     fn eval(&self) -> EvalInt;
+}
+
+pub trait EvalSEE {
+    /// Evaluate the outcome of an exchange at a square (static exchange evaluation).
+    ///
+    /// # Arguments
+    ///
+    /// * dest: Square where the exchange happens.
+    /// * first_move_side: Side to move first in the exchange.
+    ///
+    /// This function may panic if a piece already at the destination is the same color as the side
+    /// to move.
+    ///
+    /// # Returns
+    ///
+    /// Expected gain from this exchange.
+    fn eval_see(&self, dest: Square, first_move_side: Color) -> EvalInt;
 }
 
 pub(crate) mod eval_score {
@@ -195,7 +212,7 @@ pub const PST_MIDGAME: Pst = Pst([
        -5,   0,   0,   0,   0,   0,   0,  -5, // 2
        -5,  -3,   0,   0,   0,   2,  -3,  -5, // 1
     //  a    b    c    d    e    f    g    h
-    ], 500),
+    ], Piece::Rook.value()),
 
     // bishop
     make_pst([
@@ -208,7 +225,7 @@ pub const PST_MIDGAME: Pst = Pst([
         0,   0,   0,   0,   0,   0,   0,   0, // 2
         0,   0, -10,   0,   0, -10,   0,   0, // 1
     //  a    b    c    d    e    f    g    h
-    ], 300),
+    ], Piece::Bishop.value()),
 
     // knight
     make_pst([
@@ -221,7 +238,7 @@ pub const PST_MIDGAME: Pst = Pst([
      -100,   1,   0,   0,   0,   0,   0,-100, // 2
      -100,-100,-100,-100,-100,-100,-100,-100, // 1
     //  a    b    c    d    e    f    g    h
-    ], 300),
+    ], Piece::Knight.value()),
 
     // king
     make_pst([
@@ -234,7 +251,7 @@ pub const PST_MIDGAME: Pst = Pst([
       -70, -70, -70, -70, -70, -70, -70, -70, // 2
         0,   0,  10,   0,   0,   0,  20,   0, // 1
     //  a    b    c    d    e    f    g    h
-    ], 20_000),
+    ], Piece::King.value()),
 
     // queen
     make_pst([
@@ -247,7 +264,7 @@ pub const PST_MIDGAME: Pst = Pst([
         0,   0,   0,   0,   0,   0,   0,   0, // 2
         0,   0,   0,   0,   0,   0,   0,   0, // 1
     //  a    b    c    d    e    f    g    h
-    ], 900),
+    ], Piece::Queen.value()),
 
     // pawn
     make_pst([
@@ -260,7 +277,7 @@ pub const PST_MIDGAME: Pst = Pst([
         0,   0,   0,   0,   0,   0,   0,   0, // 2
         0,   0,   0,   0,   0,   0,   0,   0, // 1
     //  a    b    c    d    e    f    g    h
-    ], 100),
+    ], Piece::Pawn.value()),
 ]);
 
 #[rustfmt::skip]
@@ -276,7 +293,7 @@ pub const PST_ENDGAME: Pst = Pst([
         0,   0,   0,   0,   0,   0,   0,   0, // 2
         0,   0,   0,   0,   0,   0,   0,   0, // 1
     //  a    b    c    d    e    f    g    h
-    ], 500),
+    ], Piece::Rook.value()),
 
     // bishop
     make_pst([
@@ -289,7 +306,7 @@ pub const PST_ENDGAME: Pst = Pst([
         0,   0,   0,   0,   0,   0,   0,   0, // 2
         0,   0,   0,   0,   0,   0,   0,   0, // 1
     //  a    b    c    d    e    f    g    h
-    ], 300),
+    ], Piece::Bishop.value()),
 
     // knight
     make_pst([
@@ -302,7 +319,7 @@ pub const PST_ENDGAME: Pst = Pst([
      -100,   0,   0,   0,   0,   0,   0,-100, // 2
      -100,-100,-100,-100,-100,-100,-100,-100, // 1
     //  a    b    c    d    e    f    g    h
-    ], 300),
+    ], Piece::Knight.value()),
 
     // king
     make_pst([
@@ -315,7 +332,7 @@ pub const PST_ENDGAME: Pst = Pst([
      -100, -20, -15, -13, -13, -15, -20,-100, // 2
      -100,-100, -90, -70, -70, -90,-100,-100, // 1
     //  a    b    c    d    e    f    g    h
-    ], 20_000),
+    ], Piece::King.value()),
 
     // queen
     make_pst([
@@ -328,7 +345,7 @@ pub const PST_ENDGAME: Pst = Pst([
         0,   0,   0,   0,   0,   0,   0,   0, // 2
         0,   0,   0,   0,   0,   0,   0,   0, // 1
     //  a    b    c    d    e    f    g    h
-    ], 900),
+    ], Piece::Queen.value()),
 
     // pawn
     make_pst([
@@ -341,7 +358,7 @@ pub const PST_ENDGAME: Pst = Pst([
         0,   0,   0,   0,   0,   0,   0,   0, // 2
         0,   0,   0,   0,   0,   0,   0,   0, // 1
     //  a    b    c    d    e    f    g    h
-    ], 100),
+    ], Piece::Pawn.value()),
 ]);
 
 /// Centipawn, signed, eval metrics.
@@ -399,6 +416,66 @@ impl Eval for Board {
     }
 }
 
+impl EvalSEE for Board {
+    fn eval_see(&self, dest: Square, first_mv_side: Color) -> EvalInt {
+        let attackers = self.gen_attackers(dest, false, None);
+
+        // indexed by the Piece enum order
+        let mut atk_qty = [[0u8; N_PIECES]; N_COLORS];
+
+        // counting sort
+        for (attacker, _src) in attackers {
+            atk_qty[attacker.col as usize][attacker.pc as usize] += 1;
+        }
+
+        let dest_pc = self.get_piece(dest);
+
+        // it doesn't make sense if the piece already on the square is first to move
+        debug_assert!(!dest_pc.is_some_and(|pc| pc.col == first_mv_side));
+
+        // Simulate the exchange.
+        //
+        // Returns the expected gain for the side in the exchange.
+        //
+        // TODO: promotions aren't accounted for.
+        fn sim_exchange(
+            side: Color,
+            dest_pc: Option<ColPiece>,
+            atk_qty: &mut [[u8; N_PIECES]; N_COLORS],
+        ) -> EvalInt {
+            use Piece::*;
+            let val_idxs = [Pawn, Knight, Bishop, Rook, Queen, King];
+
+            let mut ptr = 0;
+            let mut eval = 0;
+
+            // while the count of this piece is zero, move to the next piece
+            while atk_qty[side as usize][val_idxs[ptr] as usize] == 0 {
+                ptr += 1;
+                if ptr == N_PIECES {
+                    return eval;
+                }
+            }
+            let cur_pc = val_idxs[ptr];
+            let pc_ptr = cur_pc as usize;
+
+            debug_assert!(atk_qty[side as usize][pc_ptr] > 0);
+            atk_qty[side as usize][pc_ptr] -= 1;
+
+            if let Some(dest_pc) = dest_pc {
+                eval += dest_pc.pc.value();
+                // this player may either give up now, or capture. pick the best (max score).
+                // anything the other player gains is taken from us, hence the minus.
+                eval = max(0, eval - sim_exchange(side.flip(), Some(dest_pc), atk_qty))
+            }
+
+            eval
+        }
+
+        sim_exchange(first_mv_side, dest_pc, &mut atk_qty)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -414,5 +491,35 @@ mod tests {
 
         assert!(eval1 > 0, "got eval {eval1} ({:?})", board1.eval);
         assert!(eval2 < 0, "got eval {eval2} ({:?})", board2.eval);
+    }
+
+    /// Static exchange evaluation tests.
+    #[test]
+    fn test_see_eval() {
+        // set side to move appropriately in the fen
+        //
+        // otherwise the exchange doesn't work
+        let test_cases = [
+            (
+                // fen
+                "8/4n3/8/2qRr3/8/4N3/8/8 b - - 0 1",
+                // square where exchange happens
+                "d5",
+                // expected (signed) value gain of exchange
+                Piece::Rook.value(),
+            ),
+            (
+                "8/8/4b3/2kq4/2PKP3/8/8/8 w - - 0 1",
+                "d5",
+                Piece::Queen.value(),
+            ),
+        ];
+
+        for (fen, dest, expected) in test_cases {
+            let board = Board::from_fen(fen).unwrap();
+            let dest: Square = dest.parse().unwrap();
+            let res = board.eval_see(dest, board.turn);
+            assert_eq!(res, expected, "failed {}", fen);
+        }
     }
 }
