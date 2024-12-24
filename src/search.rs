@@ -272,7 +272,7 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Vec<M
         mvs.retain(|(_priority, mv): &(EvalInt, Move)| -> bool {
             let see = board.eval_see(mv.dest, board.turn);
 
-            see > 0
+            see >= 0
         });
     }
 
@@ -419,12 +419,23 @@ impl TimeLimits {
     ) -> TimeLimits {
         // hard timeout (max)
         let mut hard_ms = 100_000;
-        // soft timeout (max)
+        // soft timeout (default max)
         let mut soft_ms = 1_200;
 
-        // if we have more than 5 minutes, and we're out of the opening, we can afford to think longer
-        if ourtime_ms > 300_000 && eval.phase <= 13 {
-            soft_ms = 4_500
+        // in some situations we can think longer
+        if eval.phase <= 13 {
+            // phase 13 is a single capture of a minor/major piece, so consider that out of the
+            // opening
+
+            soft_ms = if ourtime_ms > 300_000 {
+                4_500
+            } else if ourtime_ms > 600_000 {
+                8_000
+            } else if ourtime_ms > 1_200_000 {
+                12_000
+            } else {
+                soft_ms
+            }
         }
 
         let factor = if ourtime_ms > 5_000 { 10 } else { 40 };
