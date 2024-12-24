@@ -23,5 +23,5 @@ pub use crate::search::{
     best_line, best_move, EngineState, SearchConfig, SearchEval, TimeLimits, TranspositionTable,
 };
 pub use crate::{
-    Board, ColPiece, Color, Piece, BOARD_HEIGHT, BOARD_WIDTH, N_COLORS, N_PIECES, N_SQUARES, Square,
+    Board, ColPiece, Color, Piece, Square, BOARD_HEIGHT, BOARD_WIDTH, N_COLORS, N_PIECES, N_SQUARES,
 };

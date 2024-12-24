@@ -122,9 +122,8 @@ impl Default for SearchConfig {
     fn default() -> Self {
         SearchConfig {
             alpha_beta_on: true,
-            // try to make this even to be more conservative and avoid horizon problem
             depth: 10,
-            qdepth: 2,
+            qdepth: 4,
             enable_trans_table: true,
             transposition_size: 24,
         }
@@ -209,13 +208,20 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Vec<M
         }
     }
 
+    // quiescence stand-pat score (only calculated if needed).
+    // this is where static eval goes.
+    let mut board_eval: Option<EvalInt> = None;
+
+    if mm.quiesce {
+        board_eval = Some(board.eval() * EvalInt::from(board.turn.sign()));
+    }
+
     if mm.depth == 0 {
-        if mm.quiesce || board.recap_sq.is_none() {
-            // if we're done with quiescence, static eval.
-            // if there is no capture, skip straight to static eval.
-            let eval = board.eval() * EvalInt::from(board.turn.sign());
-            return (Vec::new(), SearchEval::Exact(eval));
+        if mm.quiesce {
+            // we hit the limit on quiescence depth
+            return (Vec::new(), SearchEval::Exact(board_eval.unwrap()));
         } else {
+            // enter quiescence search
             return minmax(
                 board,
                 state,
@@ -261,10 +267,14 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Vec<M
     mvs.sort_unstable_by_key(|mv| -mv.0);
 
     let mut abs_best = SearchEval::Exact(EVAL_WORST);
+
+    if mm.quiesce {
+        // stand pat
+        abs_best = SearchEval::Exact(board_eval.unwrap());
+    }
+
     let mut best_move: Option<Move> = None;
     let mut best_continuation: Vec<Move> = Vec::new();
-
-    let n_non_qmoves = mvs.len();
 
     // determine moves that are allowed in quiescence
     if mm.quiesce {
@@ -276,7 +286,11 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Vec<M
         });
     }
 
-    if n_non_qmoves == 0 {
+    if mvs.is_empty() {
+        if mm.quiesce {
+            // use stand pat
+            return (Vec::new(), SearchEval::Exact(board_eval.unwrap()));
+        }
         let is_in_check = board.is_check(board.turn);
 
         if is_in_check {
@@ -285,10 +299,6 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Vec<M
             // stalemate
             return (Vec::new(), SearchEval::Exact(0));
         }
-    } else if mvs.is_empty() {
-        // pruned all the moves due to quiescence
-        let eval = board.eval() * EvalInt::from(board.turn.sign());
-        return (Vec::new(), SearchEval::Exact(eval));
     }
 
     for (_priority, mv) in mvs {

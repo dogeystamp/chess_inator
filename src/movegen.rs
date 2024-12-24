@@ -1667,25 +1667,23 @@ mod tests {
 
     #[test]
     fn test_capture_movegen() {
-        let test_cases = [(
-            // fen
-            "8/3q4/5N2/8/8/8/8/3K4 w - - 0 1",
-            // expected moves generated
-            "f6d7",
-        ),
-        (
-            "8/8/8/3pP3/2K5/8/8/8 w - d6 0 1",
-            // holy hell
-            "e5d6 c4d5",
-        ),
-        (
-            "8/2q5/3K4/8/8/8/8/8 w - - 0 1",
-            "d6c7",
-        ),
-        (
-            "2Q5/3r2R1/2B1PN2/8/3K4/8/8/8 w - - 0 1",
-            "c6d7 e6d7 c8d7 f6d7 g7d7",
-        ),
+        let test_cases = [
+            (
+                // fen
+                "8/3q4/5N2/8/8/8/8/3K4 w - - 0 1",
+                // expected moves generated
+                "f6d7",
+            ),
+            (
+                "8/8/8/3pP3/2K5/8/8/8 w - d6 0 1",
+                // holy hell
+                "e5d6 c4d5",
+            ),
+            ("8/2q5/3K4/8/8/8/8/8 w - - 0 1", "d6c7"),
+            (
+                "2Q5/3r2R1/2B1PN2/8/3K4/8/8/8 w - - 0 1",
+                "c6d7 e6d7 c8d7 f6d7 g7d7",
+            ),
         ];
 
         for (fen, expected) in test_cases {
