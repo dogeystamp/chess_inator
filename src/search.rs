@@ -124,7 +124,7 @@ impl Default for SearchConfig {
             alpha_beta_on: true,
             // try to make this even to be more conservative and avoid horizon problem
             depth: 10,
-            qdepth: 3,
+            qdepth: 2,
             enable_trans_table: true,
             transposition_size: 24,
         }
