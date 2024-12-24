@@ -124,7 +124,7 @@ impl Default for SearchConfig {
             alpha_beta_on: true,
             // try to make this even to be more conservative and avoid horizon problem
             depth: 10,
-            qdepth: 1,
+            qdepth: 2,
             enable_trans_table: true,
             transposition_size: 24,
         }
@@ -234,10 +234,12 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Vec<M
     // our best is their worst
     let beta = mm.beta.unwrap_or(EVAL_BEST);
 
-    let mut mvs: Vec<_> = board
-        .gen_moves()
-        .into_iter()
-        .collect::<Vec<_>>()
+    let mvs = if mm.quiesce {
+        board.gen_captures().into_iter().collect::<Vec<_>>()
+    } else {
+        board.gen_moves().into_iter().collect::<Vec<_>>()
+    };
+    let mut mvs: Vec<_> = mvs
         .into_iter()
         .map(|mv| (move_priority(board, &mv, state), mv))
         .collect();
@@ -266,14 +268,11 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Vec<M
 
     // determine moves that are allowed in quiescence
     if mm.quiesce {
+        // use static exchange evaluation to prune moves
         mvs.retain(|(_priority, mv): &(EvalInt, Move)| -> bool {
-            if let Some(recap_sq) = board.recap_sq {
-                if mv.dest == recap_sq {
-                    return false;
-                }
-            }
+            let see = board.eval_see(mv.dest, board.turn);
 
-            false
+            see > 0
         });
     }
 
