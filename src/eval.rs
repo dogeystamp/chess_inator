@@ -499,6 +499,7 @@ mod tests {
         // set side to move appropriately in the fen
         //
         // otherwise the exchange doesn't work
+        use Piece::*;
         let test_cases = [
             (
                 // fen
@@ -506,12 +507,17 @@ mod tests {
                 // square where exchange happens
                 "d5",
                 // expected (signed) value gain of exchange
-                Piece::Rook.value(),
+                Rook.value(),
             ),
             (
                 "8/8/4b3/2kq4/2PKP3/8/8/8 w - - 0 1",
                 "d5",
-                Piece::Queen.value(),
+                Queen.value(),
+            ),
+            (
+                "r3k2r/1pq2pbp/6p1/p2Qpb2/1N6/2P3P1/PB2PPBP/R3K2R w KQkq - 0 14",
+                "e5",
+                0,
             ),
         ];
 
