@@ -208,8 +208,8 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Vec<M
         }
     }
 
-    if board.history.count(board.zobrist) == 2 {
-        // draw by repetition
+    if !mm.quiesce && board.history.count(board.zobrist) == 1 {
+        // avoid draw by repetition
         return (Vec::new(), SearchEval::Exact(0));
     }
 
