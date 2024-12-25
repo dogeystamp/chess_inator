@@ -628,6 +628,11 @@ impl Board {
         Board::from_fen(START_POSITION).unwrap()
     }
 
+    /// Save the current position's hash in the history.
+    pub fn push_history(&mut self) {
+        self.history.push(self.zobrist);
+    }
+
     /// Get iterator over all squares.
     pub fn squares() -> impl Iterator<Item = Square> {
         (0..N_SQUARES).map(Square::try_from).map(|x| x.unwrap())

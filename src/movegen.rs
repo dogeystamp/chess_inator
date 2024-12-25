@@ -98,8 +98,6 @@ pub struct AntiMove {
 impl AntiMove {
     /// Undo the move.
     pub fn unmake(self, pos: &mut Board) {
-        pos.history.pop();
-
         Zobrist::toggle_board_info(pos);
 
         pos.move_piece(self.dest, self.src);
@@ -185,8 +183,6 @@ impl Move {
             castle: pos.castle,
             ep_square: pos.ep_square,
         };
-
-        pos.history.push(pos.zobrist);
 
         // undo hashes (we will update them at the end of this function)
         Zobrist::toggle_board_info(pos);
