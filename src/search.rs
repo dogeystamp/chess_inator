@@ -208,10 +208,7 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Vec<M
         }
     }
 
-    if !mm.quiesce && board.history.count(board.zobrist) == 1 {
-        // avoid draw by repetition
-        return (Vec::new(), SearchEval::Exact(0));
-    }
+    let is_drawn = !mm.quiesce && board.history.count(board.zobrist) >= 1;
 
     // quiescence stand-pat score (only calculated if needed).
     // this is where static eval goes.
@@ -344,6 +341,10 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Vec<M
             }
             break;
         }
+    }
+
+    if is_drawn {
+        abs_best = SearchEval::Exact(0);
     }
 
     if let Some(best_move) = best_move {
