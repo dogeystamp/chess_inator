@@ -449,6 +449,138 @@ impl Display for CastleRights {
     }
 }
 
+/// Ring-buffer pointer that will never point outside the buffer.
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
+struct RingPtr<const N: usize>(usize);
+
+impl<const N: usize> From<RingPtr<N>> for usize {
+    fn from(value: RingPtr<N>) -> Self {
+        debug_assert!((0..N).contains(&value.0));
+        value.0
+    }
+}
+
+impl<const N: usize> std::ops::Add<usize> for RingPtr<N> {
+    type Output = Self;
+
+    fn add(self, rhs: usize) -> Self::Output {
+        Self((self.0 + rhs) % N)
+    }
+}
+
+impl<const N: usize> std::ops::Sub<usize> for RingPtr<N> {
+    type Output = Self;
+
+    fn sub(self, rhs: usize) -> Self::Output {
+        Self((self.0 + N - rhs) % N)
+    }
+}
+
+impl<const N: usize> std::ops::AddAssign<usize> for RingPtr<N> {
+    fn add_assign(&mut self, rhs: usize) {
+        self.0 = (self.0 + rhs) % N;
+    }
+}
+
+impl<const N: usize> std::ops::SubAssign<usize> for RingPtr<N> {
+    fn sub_assign(&mut self, rhs: usize) {
+        self.0 = (self.0 + N - rhs) % N;
+    }
+}
+
+impl<const N: usize> Default for RingPtr<N> {
+    fn default() -> Self {
+        Self(0)
+    }
+}
+
+impl<const N: usize> RingPtr<N> {}
+
+/// Ring-buffer of previously seen hashes, used to avoid draw by repetition.
+///
+/// Only stores at most `HISTORY_SIZE` plies, since most cases of repetition happen recently.
+/// Technically, it should be 100 plies because of the 50-move rule.
+#[derive(Default, Clone, Copy, Debug)]
+struct BoardHistory {
+    hashes: [Zobrist; HISTORY_SIZE],
+    /// Index of the start of the history in the buffer
+    ptr_start: RingPtr<HISTORY_SIZE>,
+    /// Index one-past-the-end of the history in the buffer
+    ptr_end: RingPtr<HISTORY_SIZE>,
+}
+
+#[cfg(test)]
+mod ringptr_tests {
+    use super::*;
+
+    /// ring buffer pointer behaviour
+    #[test]
+    fn test_ringptr() {
+        let ptr_start: RingPtr<3> = RingPtr::default();
+
+        let ptr: RingPtr<3> = RingPtr::default() + 3;
+        assert_eq!(ptr, ptr_start);
+
+        let ptr2: RingPtr<3> = RingPtr::default() + 2;
+        assert_eq!(ptr2, ptr_start - 1);
+        assert_eq!(ptr2, ptr_start + 2);
+    }
+}
+
+impl PartialEq for BoardHistory {
+    /// Always equal, since comparing two boards with different histories shouldn't matter.
+    fn eq(&self, _other: &Self) -> bool {
+        true
+    }
+}
+
+impl Eq for BoardHistory {}
+
+/// Size in plies of the board history.
+///
+/// Actual capacity is one less than this.
+const HISTORY_SIZE: usize = 30;
+
+impl BoardHistory {
+    /// Counts occurences of this hash in the history.
+    fn count(&self, hash: Zobrist) -> usize {
+        let mut ans = 0;
+
+        let mut i = self.ptr_start;
+        while i != self.ptr_end {
+            if self.hashes[usize::from(i)] == hash {
+                ans += 1;
+            }
+            i += 1;
+        }
+
+        ans
+    }
+
+    /// Add (push) hash to history.
+    fn push(&mut self, hash: Zobrist) {
+        self.hashes[usize::from(self.ptr_end)] = hash;
+
+        self.ptr_end += 1;
+
+        // replace old entries
+        if self.ptr_end == self.ptr_start {
+            self.ptr_start += 1;
+        }
+    }
+
+    /// Remove from end (pop) hash from history.
+    ///
+    /// Adding and then removing a hash may erase old entries due to lack of space.
+    fn pop(&mut self) {
+        if self.ptr_end == self.ptr_start {
+            // history is empty already
+        } else {
+            self.ptr_end -= 1;
+        }
+    }
+}
+
 /// Game state, describes a position.
 ///
 /// Default is empty.
@@ -485,6 +617,9 @@ pub struct Board {
 
     /// Last captured square
     recap_sq: Option<Square>,
+
+    /// History of recent hashes to avoid repetition draws.
+    history: BoardHistory,
 }
 
 impl Board {
@@ -564,13 +699,11 @@ impl Board {
             turn: self.turn.flip(),
             half_moves: self.half_moves,
             full_moves: self.full_moves,
-            players: Default::default(),
-            mail: Default::default(),
             ep_square: self.ep_square.map(|sq| sq.mirror_vert()),
             castle: CastleRights(self.castle.0),
-            eval: Default::default(),
             zobrist: Zobrist::default(),
             recap_sq: self.recap_sq.map(|sq| sq.mirror_vert()),
+            ..Default::default()
         };
 
         new_board.castle.0.reverse();
@@ -672,6 +805,7 @@ mod tests {
     use super::*;
 
     use fen::FromFen;
+    use movegen::{FromUCIAlgebraic, Move};
 
     #[test]
     fn test_square_casts() {
@@ -798,5 +932,127 @@ mod tests {
                 res, expected
             );
         }
+    }
+
+    #[test]
+    fn test_history() {
+        let board = Board::starting_pos();
+
+        let mut history = BoardHistory::default();
+        for _ in 0..(HISTORY_SIZE + 15) {
+            history.push(board.zobrist);
+        }
+
+        assert_eq!(history.count(board.zobrist), HISTORY_SIZE - 1);
+
+        let board_empty = Board::default();
+        history.push(board_empty.zobrist);
+
+        assert_eq!(history.count(board.zobrist), HISTORY_SIZE - 2);
+        assert_eq!(history.count(board_empty.zobrist), 1);
+
+        for _ in 0..3 {
+            history.push(board_empty.zobrist);
+        }
+
+        assert_eq!(history.count(board_empty.zobrist), 4);
+        assert_eq!(history.count(board.zobrist), HISTORY_SIZE - 5);
+
+        for _ in 0..3 {
+            history.pop();
+        }
+
+        assert_eq!(history.count(board_empty.zobrist), 1);
+        // after popping, the replaced entries no longer exist
+        assert_eq!(history.count(board.zobrist), HISTORY_SIZE - 5);
+
+        history.pop();
+        assert_eq!(history.count(board_empty.zobrist), 0);
+        assert_eq!(history.count(board.zobrist), HISTORY_SIZE - 5);
+
+        history.pop();
+        assert_eq!(history.count(board_empty.zobrist), 0);
+        assert_eq!(history.count(board.zobrist), HISTORY_SIZE - 6);
+    }
+
+    #[test]
+    fn repetition_detection() {
+        let mut board = Board::starting_pos();
+
+        let mvs = "b1c3 b8c6 c3b1 c6b8"
+            .split_whitespace()
+            .map(Move::from_uci_algebraic)
+            .map(|x| x.unwrap())
+            .collect::<Vec<_>>();
+
+        for _ in 0..2 {
+            for mv in &mvs {
+                let _ = mv.make(&mut board);
+            }
+        }
+
+        // this is the third occurence, but beforehand there are two occurences
+        assert_eq!(board.history.count(board.zobrist), 2);
+    }
+
+    /// engine should take advantage of the three time repetition rule
+    #[test]
+    fn find_repetition() {
+        use eval::EvalInt;
+        use search::{best_line, EngineState, SearchConfig, TranspositionTable};
+        let mut board = Board::from_fen("qqqp4/pkpp4/8/8/8/8/8/K7 b - - 0 1").unwrap();
+
+        let mvs = "b7b6 a1a2 b6b7 a2a1 b7b6 a1a2 b6b7"
+            .split_whitespace()
+            .map(Move::from_uci_algebraic)
+            .map(|x| x.unwrap())
+            .collect::<Vec<_>>();
+
+        let expected_bestmv = Move::from_uci_algebraic("a2a1").unwrap();
+
+        for mv in &mvs {
+            let _ = mv.make(&mut board);
+        }
+
+        let (_tx, rx) = std::sync::mpsc::channel();
+        let cache = TranspositionTable::new(1);
+
+        let mut engine_state = EngineState::new(
+            SearchConfig {
+                depth: 1,
+                qdepth: 0,
+                enable_trans_table: false,
+                ..Default::default()
+            },
+            rx,
+            cache,
+            search::TimeLimits::default(),
+        );
+
+        let (line, eval) = best_line(&mut board, &mut engine_state);
+        let best_mv = line.last().unwrap();
+
+        assert_eq!(*best_mv, expected_bestmv);
+        assert!(EvalInt::from(eval) == 0);
+
+        // now ensure that it's completely one-sided without the repetition opportunity
+        let mut board = Board::from_fen("qqqp4/pkpp4/8/8/8/8/8/K7 w - - 0 1").unwrap();
+
+        let (_tx, rx) = std::sync::mpsc::channel();
+        let cache = TranspositionTable::new(1);
+        let mut engine_state = EngineState::new(
+            SearchConfig {
+                depth: 1,
+                qdepth: 0,
+                enable_trans_table: false,
+                ..Default::default()
+            },
+            rx,
+            cache,
+            search::TimeLimits::default(),
+        );
+
+        let (_line, eval) = best_line(&mut board, &mut engine_state);
+        assert!(EvalInt::from(eval) < 0);
     }
 }

@@ -208,6 +208,11 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Vec<M
         }
     }
 
+    if board.history.count(board.zobrist) == 2 {
+        // draw by repetition
+        return (Vec::new(), SearchEval::Exact(0));
+    }
+
     // quiescence stand-pat score (only calculated if needed).
     // this is where static eval goes.
     let mut board_eval: Option<EvalInt> = None;
