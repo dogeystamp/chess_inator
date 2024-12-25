@@ -9,8 +9,9 @@ Features:
     - Tapered midgame-endgame evaluation
 - UCI compatibility
 - Iterative deepening
+    - Time management
 - Transposition table (Zobrist hashing)
-    - Currently only stores best move.
+- Quiescence search
 
 ## instructions
 
