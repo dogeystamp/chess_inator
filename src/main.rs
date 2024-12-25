@@ -160,9 +160,45 @@ fn cmd_go(mut tokens: std::str::SplitWhitespace<'_>, state: &mut MainState) {
 }
 
 /// Print static evaluation of the position.
+///
+/// This calculation is inefficient compared to what happens in the real engine, but it offers more
+/// information.
 fn cmd_eval(mut _tokens: std::str::SplitWhitespace<'_>, state: &mut MainState) {
     let res = eval_metrics(&state.board);
-    println!("STATIC EVAL (negative black, positive white):\n- pst: {}\n- king distance: {} ({} distance)\n- phase: {}\n- total: {}", res.pst_eval, res.king_distance_eval, res.king_distance, res.phase, res.total_eval);
+    println!("STATIC EVAL (negative black, positive white):");
+    println!("- pst total: {}", res.pst_eval);
+    let tables = [
+        ("midgame", &chess_inator::eval::PST_MIDGAME),
+        ("endgame", &chess_inator::eval::PST_ENDGAME),
+    ];
+    for (name, pst) in tables {
+        println!("  {name}");
+        let mut cumulative_table = 0;
+        use Piece::*;
+        for col in [Color::White, Color::Black] {
+            for pc_type in [Pawn, Knight, Bishop, Rook, Queen, King] {
+                let mut cumulative = 0;
+                let sqs = state.board[col][pc_type];
+                let pc = ColPiece { pc: pc_type, col };
+                print!("    {:?} {:?}\n      ", col, pc_type);
+                for sq in sqs {
+                    let score = pst[pc.pc][pc.col][sq] * EvalInt::from(pc.col.sign());
+                    cumulative += score;
+                    print!("{} {};  ", sq, score);
+                }
+                println!();
+                println!("      total {}: {}", char::from(pc), cumulative);
+                cumulative_table += cumulative;
+            }
+        }
+        println!("  TOTAL {name}: {cumulative_table}");
+    }
+    println!(
+        "- king distance: {} ({})",
+        res.king_distance_eval, res.king_distance
+    );
+    println!("- phase: {}", res.phase);
+    println!("- total: {}", res.total_eval);
 }
 
 /// Root UCI parser.

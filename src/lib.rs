@@ -100,8 +100,8 @@ pub struct PieceErr;
 /// Color and piece.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ColPiece {
-    pc: Piece,
-    col: Color,
+    pub pc: Piece,
+    pub col: Color,
 }
 
 impl TryFrom<char> for ColPiece {
