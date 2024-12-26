@@ -136,7 +136,7 @@ impl Default for SearchConfig {
             alpha_beta_on: true,
             depth: 16,
             qdepth: 6,
-            contempt: 10,
+            contempt: 3,
             enable_trans_table: true,
             transposition_size: 24,
         }
