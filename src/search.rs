@@ -112,6 +112,18 @@ pub struct SearchConfig {
     pub depth: usize,
     /// Limit quiescence search depth
     pub qdepth: usize,
+
+    /// Parameter that sets how confident the engine is.
+    ///
+    /// Positive means avoid draws, and try to win instead.
+    ///
+    /// Depending on the game phase, an extra factor will be multiplied too; in the beginning of
+    /// the game the opponent is more likely to blunder later and lose their advantage, so we don't
+    /// go for draws. Later, the result is more certain, so reduce the contempt factor.
+    ///
+    /// An alternative interpretation of this: the contempt factor is the negative of the value
+    /// assigned to a draw.
+    pub contempt: EvalInt,
     /// Enable transposition table.
     pub enable_trans_table: bool,
     /// Transposition table size (2^n where this is n)
@@ -124,6 +136,7 @@ impl Default for SearchConfig {
             alpha_beta_on: true,
             depth: 16,
             qdepth: 6,
+            contempt: 23,
             enable_trans_table: true,
             transposition_size: 24,
         }
@@ -209,6 +222,11 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Vec<M
     }
 
     let is_repetition_draw = board.history.count(board.zobrist) >= 2;
+    let phase_factor = EvalInt::from(board.eval.min_maj_pieces / 5);
+    // positive here since we're looking from the opposite perspective.
+    // if white caused a draw, then we'd be black here.
+    // therefore, white would see a negative value for the draw.
+    let contempt = state.config.contempt * phase_factor;
 
     // quiescence stand-pat score (only calculated if needed).
     // this is where static eval goes.
@@ -216,7 +234,7 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Vec<M
 
     if mm.quiesce {
         board_eval = Some(if is_repetition_draw {
-            0
+            contempt
         } else {
             board.eval() * EvalInt::from(board.turn.sign())
         });
@@ -348,7 +366,7 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Vec<M
     }
 
     if is_repetition_draw {
-        abs_best = SearchEval::Exact(0);
+        abs_best = SearchEval::Exact(contempt);
     }
 
     if let Some(best_move) = best_move {
