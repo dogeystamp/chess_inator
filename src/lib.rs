@@ -539,7 +539,7 @@ impl Eq for BoardHistory {}
 /// Size in plies of the board history.
 ///
 /// Actual capacity is one less than this.
-const HISTORY_SIZE: usize = 10;
+const HISTORY_SIZE: usize = 15;
 
 impl BoardHistory {
     /// Counts occurences of this hash in the history.
