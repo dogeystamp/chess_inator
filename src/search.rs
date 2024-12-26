@@ -113,7 +113,7 @@ pub struct SearchConfig {
     /// Limit quiescence search depth
     pub qdepth: usize,
 
-    /// Parameter that sets how confident the engine is.
+    /// Parameter (centipawns) that sets how confident the engine is.
     ///
     /// Positive means avoid draws, and try to win instead.
     ///
@@ -136,7 +136,7 @@ impl Default for SearchConfig {
             alpha_beta_on: true,
             depth: 16,
             qdepth: 6,
-            contempt: 3,
+            contempt: 0,
             enable_trans_table: true,
             transposition_size: 24,
         }
