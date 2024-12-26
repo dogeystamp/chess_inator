@@ -63,8 +63,8 @@ fn cmd_position_moves(mut tokens: std::str::SplitWhitespace<'_>, mut board: Boar
             "moves" => {
                 for mv in tokens.by_ref() {
                     let mv = Move::from_uci_algebraic(mv).unwrap();
-                    let _ = mv.make(&mut board);
                     board.push_history();
+                    let _ = mv.make(&mut board);
                 }
             }
             _ => ignore!(),

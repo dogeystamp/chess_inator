@@ -208,14 +208,18 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Vec<M
         }
     }
 
-    let is_drawn = !mm.quiesce && board.history.count(board.zobrist) >= 1;
+    let is_repetition_draw = board.history.count(board.zobrist) >= 2;
 
     // quiescence stand-pat score (only calculated if needed).
     // this is where static eval goes.
     let mut board_eval: Option<EvalInt> = None;
 
     if mm.quiesce {
-        board_eval = Some(board.eval() * EvalInt::from(board.turn.sign()));
+        board_eval = Some(if is_repetition_draw {
+            0
+        } else {
+            board.eval() * EvalInt::from(board.turn.sign())
+        });
     }
 
     if mm.depth == 0 {
@@ -343,7 +347,7 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Vec<M
         }
     }
 
-    if is_drawn {
+    if is_repetition_draw {
         abs_best = SearchEval::Exact(0);
     }
 

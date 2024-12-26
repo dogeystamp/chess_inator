@@ -568,17 +568,6 @@ impl BoardHistory {
             self.ptr_start += 1;
         }
     }
-
-    /// Remove from end (pop) hash from history.
-    ///
-    /// Adding and then removing a hash may erase old entries due to lack of space.
-    fn pop(&mut self) {
-        if self.ptr_end == self.ptr_start {
-            // history is empty already
-        } else {
-            self.ptr_end -= 1;
-        }
-    }
 }
 
 /// Game state, describes a position.
@@ -810,7 +799,7 @@ mod tests {
     use super::*;
 
     use fen::FromFen;
-    use movegen::{FromUCIAlgebraic, Move};
+    use movegen::{FromUCIAlgebraic, Move, ToUCIAlgebraic};
 
     #[test]
     fn test_square_casts() {
@@ -962,22 +951,6 @@ mod tests {
 
         assert_eq!(history.count(board_empty.zobrist), 4);
         assert_eq!(history.count(board.zobrist), HISTORY_SIZE - 5);
-
-        for _ in 0..3 {
-            history.pop();
-        }
-
-        assert_eq!(history.count(board_empty.zobrist), 1);
-        // after popping, the replaced entries no longer exist
-        assert_eq!(history.count(board.zobrist), HISTORY_SIZE - 5);
-
-        history.pop();
-        assert_eq!(history.count(board_empty.zobrist), 0);
-        assert_eq!(history.count(board.zobrist), HISTORY_SIZE - 5);
-
-        history.pop();
-        assert_eq!(history.count(board_empty.zobrist), 0);
-        assert_eq!(history.count(board.zobrist), HISTORY_SIZE - 6);
     }
 
     #[test]
@@ -992,6 +965,7 @@ mod tests {
 
         for _ in 0..2 {
             for mv in &mvs {
+                board.push_history();
                 let _ = mv.make(&mut board);
             }
         }
@@ -1015,9 +989,16 @@ mod tests {
 
         let expected_bestmv = Move::from_uci_algebraic("a2a1").unwrap();
 
+        let mut cnt = 0;
+
         for mv in &mvs {
+            board.push_history();
+            cnt += 1;
             let _ = mv.make(&mut board);
         }
+
+        eprintln!("board is: '{}'", board.to_fen());
+        eprintln!("added {} history entries", cnt);
 
         let (_tx, rx) = std::sync::mpsc::channel();
         let cache = TranspositionTable::new(1);
@@ -1037,7 +1018,20 @@ mod tests {
         let (line, eval) = best_line(&mut board, &mut engine_state);
         let best_mv = line.last().unwrap();
 
-        assert_eq!(*best_mv, expected_bestmv);
+        expected_bestmv.make(&mut board);
+        eprintln!(
+            "after expected mv, board repeated {} times",
+            board.history.count(board.zobrist)
+        );
+
+        assert_eq!(
+            *best_mv,
+            expected_bestmv,
+            "got {} (eval {:?}) instead of {}",
+            best_mv.to_uci_algebraic(),
+            eval,
+            expected_bestmv.to_uci_algebraic()
+        );
         assert!(EvalInt::from(eval) == 0);
 
         // now ensure that it's completely one-sided without the repetition opportunity
