@@ -111,51 +111,56 @@ fn cmd_position(mut tokens: std::str::SplitWhitespace<'_>, state: &mut MainState
 
 /// Play the game.
 fn cmd_go(mut tokens: std::str::SplitWhitespace<'_>, state: &mut MainState) {
-    let mut wtime = 0;
-    let mut btime = 0;
+    let mut wtime: Option<u64> = None;
+    let mut btime: Option<u64> = None;
+    let mut movetime: Option<u64> = None;
 
     macro_rules! set_time {
-        ($color: expr, $var: ident) => {
+        ($var: ident) => {
             if let Some(time) = tokens.next() {
-                if let Ok(time) = time.parse::<u64>() {
-                    $var = time;
-                }
+                $var = time.parse::<u64>().ok();
             }
         };
     }
 
+
     while let Some(token) = tokens.next() {
         match token {
             "wtime" => {
-                set_time!(Color::White, wtime)
+                set_time!(wtime)
             }
             "btime" => {
-                set_time!(Color::Black, btime)
+                set_time!(btime)
+            }
+            "movetime" => {
+                set_time!(movetime)
             }
             _ => ignore!(),
         }
     }
 
-    let (mut ourtime_ms, theirtime_ms) = if state.board.get_turn() == Color::White {
+    let (ourtime_ms, theirtime_ms) = if state.board.get_turn() == Color::White {
         (wtime, btime)
     } else {
         (btime, wtime)
     };
 
-    if ourtime_ms == 0 {
-        ourtime_ms = 300_000
-    }
+    let time_lims = if let Some(movetime) = movetime {
+        TimeLimits::from_movetime(movetime)
+    } else {
+        TimeLimits::from_ourtime_theirtime(
+            ourtime_ms.unwrap_or(300_000),
+            theirtime_ms.unwrap_or(300_000),
+            eval_metrics(&state.board),
+        )
+    };
 
     state
         .tx_engine
         .send(MsgToEngine::Go(Box::new(GoMessage {
             board: state.board,
             config: state.config,
-            time_lims: TimeLimits::from_ourtime_theirtime(
-                ourtime_ms,
-                theirtime_ms,
-                eval_metrics(&state.board),
-            ),
+            time_lims,
         })))
         .unwrap();
 }

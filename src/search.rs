@@ -454,7 +454,7 @@ impl TimeLimits {
         ourtime_ms: u64,
         _theirtime_ms: u64,
         eval: EvalMetrics,
-    ) -> TimeLimits {
+    ) -> Self {
         // hard timeout (max)
         let mut hard_ms = 100_000;
         // soft timeout (default max)
@@ -486,6 +486,16 @@ impl TimeLimits {
         TimeLimits {
             hard: Some(hard_limit),
             soft: Some(soft_limit),
+        }
+    }
+
+    /// Make time limit based on an exact hard limit.
+    pub fn from_movetime(movetime_ms: u64) -> Self {
+        let hard_limit = Instant::now() + Duration::from_millis(movetime_ms);
+
+        TimeLimits {
+            hard: Some(hard_limit),
+            soft: None,
         }
     }
 }
