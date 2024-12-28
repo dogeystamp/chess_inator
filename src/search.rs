@@ -128,6 +128,8 @@ pub struct SearchConfig {
     pub enable_trans_table: bool,
     /// Transposition table size (2^n where this is n)
     pub transposition_size: usize,
+    /// Print machine-readable information about the position during NNUE training data generation.
+    pub nnue_train_info: bool,
 }
 
 impl Default for SearchConfig {
@@ -139,6 +141,7 @@ impl Default for SearchConfig {
             contempt: 0,
             enable_trans_table: true,
             transposition_size: 24,
+            nnue_train_info: false,
         }
     }
 }
@@ -450,11 +453,7 @@ impl TimeLimits {
     /// Make time limits based on wtime, btime (but color-independent).
     ///
     /// Also takes in eval metrics, for instance to avoid wasting too much time in the opening.
-    pub fn from_ourtime_theirtime(
-        ourtime_ms: u64,
-        _theirtime_ms: u64,
-        eval: EvalMetrics,
-    ) -> Self {
+    pub fn from_ourtime_theirtime(ourtime_ms: u64, _theirtime_ms: u64, eval: EvalMetrics) -> Self {
         // hard timeout (max)
         let mut hard_ms = 100_000;
         // soft timeout (default max)
@@ -549,4 +548,28 @@ pub fn best_line(board: &mut Board, engine_state: &mut EngineState) -> (Vec<Move
 pub fn best_move(board: &mut Board, engine_state: &mut EngineState) -> Option<Move> {
     let (line, _eval) = best_line(board, engine_state);
     line.last().copied()
+}
+
+/// Utility for NNUE training set generation to determine if a position is quiet or not.
+///
+/// Our definition of "quiet" is that there are no checks, and the static and quiescence search
+/// evaluations are similar. (See https://arxiv.org/html/2412.17948v1.)
+///
+/// It is the caller's responsibility to get the search evaluation and pass it to this function.
+pub fn is_quiescent_position(board: &Board, eval: SearchEval) -> bool {
+    // max centipawn value difference to call "similar"
+    const THRESHOLD: EvalInt = 170;
+
+    if board.is_check(board.turn) {
+        return false;
+    }
+
+    if matches!(eval, SearchEval::Checkmate(_)) {
+        return false;
+    }
+
+    // white perspective
+    let abs_eval = EvalInt::from(eval) * EvalInt::from(board.turn.sign());
+
+    (board.eval() - EvalInt::from(abs_eval)).abs() <= THRESHOLD.abs()
 }

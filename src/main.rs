@@ -51,8 +51,9 @@ macro_rules! ignore {
 /// UCI engine metadata query.
 fn cmd_uci() -> String {
     let str = "id name chess_inator\n\
-                id author dogeystamp\n\
-                uciok";
+               id author dogeystamp\n\
+               option name NNUETrainInfo type check default false\n\
+               uciok";
     str.into()
 }
 
@@ -122,7 +123,6 @@ fn cmd_go(mut tokens: std::str::SplitWhitespace<'_>, state: &mut MainState) {
             }
         };
     }
-
 
     while let Some(token) = tokens.next() {
         match token {
@@ -207,6 +207,50 @@ fn cmd_eval(mut _tokens: std::str::SplitWhitespace<'_>, state: &mut MainState) {
     println!("- total: {}", res.total_eval);
 }
 
+fn match_true_false(s: &str) -> Option<bool> {
+    match s {
+        "true" => Some(true),
+        "false" => Some(false),
+        _ => None,
+    }
+}
+
+/// Set engine options via UCI.
+fn cmd_setoption(mut tokens: std::str::SplitWhitespace<'_>, state: &mut MainState) {
+    while let Some(token) = tokens.next() {
+        fn get_val(mut tokens: std::str::SplitWhitespace<'_>) -> Option<String> {
+            if let Some("value") = tokens.next() {
+                if let Some(value) = tokens.next() {
+                    return Some(value.to_string());
+                }
+            }
+            None
+        }
+
+        match token {
+            "name" => {
+                if let Some(name) = tokens.next() {
+                    match name {
+                        "NNUETrainInfo" => {
+                            if let Some(value) = get_val(tokens) {
+                                if let Some(value) = match_true_false(&value) {
+                                    state.config.nnue_train_info = value;
+                                }
+                            }
+                        }
+                        _ => {
+                            println!("info string Unknown option: {}", name)
+                        }
+                    }
+                }
+            }
+            _ => ignore!(),
+        }
+
+        break;
+    }
+}
+
 /// Root UCI parser.
 fn cmd_root(mut tokens: std::str::SplitWhitespace<'_>, state: &mut MainState) {
     while let Some(token) = tokens.next() {
@@ -242,6 +286,9 @@ fn cmd_root(mut tokens: std::str::SplitWhitespace<'_>, state: &mut MainState) {
                     state.tx_engine.send(MsgToEngine::Stop).unwrap();
                 }
             }
+            "setoption" => {
+                cmd_setoption(tokens, state);
+            }
             // non-standard command.
             "eval" => {
                 cmd_eval(tokens, state);
@@ -274,6 +321,10 @@ fn outp_bestmove(bestmove: MsgBestmove) {
             panic!("info string ERROR: stopped search")
         }
     }
+    for line in bestmove.info {
+        println!("info string {line}");
+    }
+
     match chosen {
         Some(mv) => println!("bestmove {}", mv.to_uci_algebraic()),
         None => println!("bestmove 0000"),
@@ -315,8 +366,21 @@ fn task_engine(tx_main: Sender<MsgToMain>, rx_engine: Receiver<MsgToEngine>) {
                     state.config = msg_box.config;
                     state.time_lims = msg_box.time_lims;
                     let (pv, eval) = best_line(&mut board, &mut state);
+
+                    let mut info: Vec<String> = Vec::new();
+                    if state.config.nnue_train_info {
+                        let is_quiet = chess_inator::search::is_quiescent_position(&board, eval);
+
+                        let is_quiet = if is_quiet {"quiet"} else {"non-quiet"};
+                        info.push(format!("NNUETrainInfo {}", is_quiet))
+                    }
+
                     tx_main
-                        .send(MsgToMain::Bestmove(MsgBestmove { pv, eval }))
+                        .send(MsgToMain::Bestmove(MsgBestmove {
+                            pv,
+                            eval,
+                            info,
+                        }))
                         .unwrap();
                 }
                 MsgToEngine::Stop => {}

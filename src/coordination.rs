@@ -165,6 +165,8 @@ pub struct MsgBestmove {
     pub pv: Vec<Move>,
     /// Evaluation of the position
     pub eval: SearchEval,
+    /// Extra information (displayed as `info string`).
+    pub info: Vec<String>,
 }
 
 /// Interface messages that may be received by main's channel.
