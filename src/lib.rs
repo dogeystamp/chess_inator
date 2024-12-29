@@ -516,15 +516,25 @@ mod ringptr_tests {
 
 /// Ring-buffer of previously seen hashes, used to avoid draw by repetition.
 ///
-/// Only stores at most `HISTORY_SIZE` plies, since most cases of repetition happen recently.
-/// Technically, it should be 100 plies because of the 50-move rule.
-#[derive(Default, Clone, Copy, Debug)]
+/// Only stores at most `HISTORY_SIZE` plies.
+#[derive(Clone, Copy, Debug)]
 struct BoardHistory {
     hashes: [Zobrist; HISTORY_SIZE],
     /// Index of the start of the history in the buffer
     ptr_start: RingPtr<HISTORY_SIZE>,
     /// Index one-past-the-end of the history in the buffer
     ptr_end: RingPtr<HISTORY_SIZE>,
+}
+
+impl Default for BoardHistory {
+    fn default() -> Self {
+        BoardHistory {
+            // rust can't derive this
+            hashes: [Zobrist::default(); HISTORY_SIZE],
+            ptr_start: Default::default(),
+            ptr_end: Default::default(),
+        }
+    }
 }
 
 impl PartialEq for BoardHistory {
@@ -539,7 +549,7 @@ impl Eq for BoardHistory {}
 /// Size in plies of the board history.
 ///
 /// Actual capacity is one less than this.
-const HISTORY_SIZE: usize = 15;
+const HISTORY_SIZE: usize = 100;
 
 impl BoardHistory {
     /// Counts occurences of this hash in the history.
