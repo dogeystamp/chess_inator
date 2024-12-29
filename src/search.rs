@@ -262,36 +262,60 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Vec<M
         }
     }
 
-    // default to worst, then gradually improve
-    let mut alpha = mm.alpha.unwrap_or(EVAL_WORST);
-    // our best is their worst
-    let beta = mm.beta.unwrap_or(EVAL_BEST);
-
-    let mvs = if mm.quiesce {
-        board.gen_captures().into_iter().collect::<Vec<_>>()
+    enum MoveGenerator {
+        /// Use heavily pruned search to generate moves leading to a quiet position.
+        Quiescence,
+        /// Generate all legal moves.
+        Normal,
+        /// Only evaluate a single move.
+        None,
+    }
+    let mut move_generator = if mm.quiesce {
+        MoveGenerator::Quiescence
     } else {
-        board.gen_moves().into_iter().collect::<Vec<_>>()
+        MoveGenerator::Normal
     };
+
+    let mut trans_table_move: Option<Move> = None;
+
+    // get transposition table entry
+    if state.config.enable_trans_table {
+        if let Some(entry) = &state.cache[board.zobrist] {
+            trans_table_move = Some(entry.best_move);
+            if entry.is_qsearch == mm.quiesce && entry.depth >= mm.depth {
+                if let SearchEval::Exact(_) | SearchEval::Upper(_) = entry.eval {
+                    // at this point, we could just return the best move + eval given, but this
+                    // bypasses the draw by repetition checks in `minmax`. so just don't generate
+                    // any other moves than the best move.
+                    move_generator = MoveGenerator::None;
+                }
+            }
+        }
+    }
+
+    let mvs = match move_generator {
+        MoveGenerator::Quiescence => board.gen_captures().into_iter().collect::<Vec<_>>(),
+        MoveGenerator::Normal => board.gen_moves().into_iter().collect::<Vec<_>>(),
+        MoveGenerator::None => Vec::new(),
+    };
+
     let mut mvs: Vec<_> = mvs
         .into_iter()
         .map(|mv| (move_priority(board, &mv, state), mv))
         .collect();
 
-    // get transposition table entry
-    if state.config.enable_trans_table {
-        if let Some(entry) = &state.cache[board.zobrist] {
-            if entry.is_qsearch == mm.quiesce && entry.depth >= mm.depth {
-                if let SearchEval::Exact(_) | SearchEval::Upper(_) = entry.eval {
-                    // no point looking for a better move
-                    return (vec![entry.best_move], entry.eval);
-                }
-            }
-            mvs.push((EVAL_BEST, entry.best_move));
-        }
+    if let Some(trans_table_move) = trans_table_move {
+        mvs.push((EVAL_BEST, trans_table_move))
     }
 
     // sort moves by decreasing priority
     mvs.sort_unstable_by_key(|mv| -mv.0);
+
+
+    // default to worst, then gradually improve
+    let mut alpha = mm.alpha.unwrap_or(EVAL_WORST);
+    // our best is their worst
+    let beta = mm.beta.unwrap_or(EVAL_BEST);
 
     let mut abs_best = SearchEval::Exact(EVAL_WORST);
 
