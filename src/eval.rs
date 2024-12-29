@@ -11,7 +11,7 @@ You should have received a copy of the GNU General Public License along with che
 Copyright © 2024 dogeystamp <dogeystamp@disroot.org>
 */
 
-//! Position evaluation.
+//! Static position evaluation (hand-crafted eval).
 
 use crate::prelude::*;
 use core::cmp::{max, min};

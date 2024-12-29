@@ -370,9 +370,11 @@ fn task_engine(tx_main: Sender<MsgToMain>, rx_engine: Receiver<MsgToEngine>) {
                     let mut info: Vec<String> = Vec::new();
                     if state.config.nnue_train_info {
                         let is_quiet = chess_inator::search::is_quiescent_position(&board, eval);
-
                         let is_quiet = if is_quiet {"quiet"} else {"non-quiet"};
-                        info.push(format!("NNUETrainInfo {}", is_quiet))
+
+                        let board_tensor = chess_inator::nnue::InputTensor::from_board(&board);
+
+                        info.push(format!("NNUETrainInfo {} {}", is_quiet, {board_tensor}))
                     }
 
                     tx_main

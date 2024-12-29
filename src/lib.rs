@@ -19,6 +19,7 @@ use std::str::FromStr;
 
 pub mod coordination;
 pub mod eval;
+pub mod nnue;
 pub mod fen;
 mod hash;
 pub mod movegen;
