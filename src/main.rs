@@ -374,7 +374,8 @@ fn task_engine(tx_main: Sender<MsgToMain>, rx_engine: Receiver<MsgToEngine>) {
 
                         let board_tensor = chess_inator::nnue::InputTensor::from_board(&board);
 
-                        info.push(format!("NNUETrainInfo {} {}", is_quiet, {board_tensor}))
+                        let abs_eval = EvalInt::from(eval) * EvalInt::from(board.get_turn().sign());
+                        info.push(format!("NNUETrainInfo {} {} {}", is_quiet, abs_eval, {board_tensor}))
                     }
 
                     tx_main
