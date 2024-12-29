@@ -80,12 +80,13 @@ impl Display for InputTensor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
     fn test_to_binary_tensor() {
         // more of a sanity check than a test
         let board = Board::from_fen("8/8/8/8/8/8/8/1b6 w - - 0 1").unwrap();
         let tensor = InputTensor::from_board(&board);
         let mut expected = [false; INP_TENSOR_SIZE];
-        expected[1 + 1 + INP_TENSOR_SIZE / 2] = true;
+        expected[INP_TENSOR_SIZE / N_COLORS + 1 + N_SQUARES] = true;
         assert_eq!(tensor.0, expected);
     }
 }
