@@ -581,7 +581,7 @@ pub fn best_move(board: &mut Board, engine_state: &mut EngineState) -> Option<Mo
 /// It is the caller's responsibility to get the search evaluation and pass it to this function.
 pub fn is_quiescent_position(board: &Board, eval: SearchEval) -> bool {
     // max centipawn value difference to call "similar"
-    const THRESHOLD: EvalInt = 170;
+    const THRESHOLD: EvalInt = 120;
 
     if board.is_check(board.turn) {
         return false;
