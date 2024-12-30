@@ -59,9 +59,13 @@ mkdir -p games
 PGN=games/"$TAG1"__"$TAG2".pgn
 
 rm -f engine1 engine2
-if [ -f "$PGN" ]; then
-	rm -i "$PGN"
-fi
+
+IDX=1
+while [ -e "$PGN" ]; do
+	PGN=games/"$TAG1"__"$TAG2"__"$IDX".pgn
+	IDX=$(( $IDX + 1 ))
+done
+printf "using pgn output: %s\n" "$PGN" > /dev/stderr
 
 git checkout "$TAG1"
 cargo build --release
