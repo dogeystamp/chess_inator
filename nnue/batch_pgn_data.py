@@ -43,8 +43,8 @@ def batch_games():
     output_folder: Path = args.output_folder
     output_folder.mkdir(exist_ok=True)
     for idx, batch in enumerate(itertools.batched(generate_games(), args.batch_size)):
-        with (output_folder / f"batch{idx:04}.pgn").open("w") as f:
+        with (output_folder / f"batch{idx}.pgn").open("w") as f:
             for game in batch:
-                f.write(str(game) + "\n")
+                f.write(str(game) + "\n\n")
 
 batch_games()
