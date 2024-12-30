@@ -224,7 +224,7 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Vec<M
         }
     }
 
-    let is_repetition_draw = board.history.count(board.zobrist) >= 2;
+    let is_repetition_draw = board.is_repetition();
     let phase_factor = EvalInt::from(board.eval.min_maj_pieces / 5);
     // positive here since we're looking from the opposite perspective.
     // if white caused a draw, then we'd be black here.
@@ -310,7 +310,6 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Vec<M
 
     // sort moves by decreasing priority
     mvs.sort_unstable_by_key(|mv| -mv.0);
-
 
     // default to worst, then gradually improve
     let mut alpha = mm.alpha.unwrap_or(EVAL_WORST);

@@ -19,10 +19,10 @@ use std::str::FromStr;
 
 pub mod coordination;
 pub mod eval;
-pub mod nnue;
 pub mod fen;
 mod hash;
 pub mod movegen;
+pub mod nnue;
 pub mod random;
 pub mod search;
 
@@ -554,7 +554,7 @@ const HISTORY_SIZE: usize = 100;
 
 impl BoardHistory {
     /// Counts occurences of this hash in the history.
-    fn count(&self, hash: Zobrist) -> usize {
+    fn _count(&self, hash: Zobrist) -> usize {
         let mut ans = 0;
 
         let mut i = self.ptr_start;
@@ -566,6 +566,20 @@ impl BoardHistory {
         }
 
         ans
+    }
+
+    /// Find if there are at least `n` matches for a hash in the last `recent` plies.
+    fn at_least_in_recent(&self, mut n: usize, recent: usize, hash: Zobrist) -> bool {
+        let mut i = self.ptr_end - recent;
+
+        while i != self.ptr_end && n > 0 {
+            if self.hashes[usize::from(i)] == hash {
+                n -= 1;
+            }
+            i += 1;
+        }
+
+        n == 0
     }
 
     /// Add (push) hash to history.
@@ -631,6 +645,12 @@ impl Board {
     /// Save the current position's hash in the history.
     pub fn push_history(&mut self) {
         self.history.push(self.zobrist);
+    }
+
+    /// Is this position a draw by three repetitions?
+    pub fn is_repetition(&mut self) -> bool {
+        self.history
+            .at_least_in_recent(2, self.half_moves, self.zobrist)
     }
 
     /// Get iterator over all squares.
@@ -948,20 +968,30 @@ mod tests {
             history.push(board.zobrist);
         }
 
-        assert_eq!(history.count(board.zobrist), HISTORY_SIZE - 1);
+        assert_eq!(history._count(board.zobrist), HISTORY_SIZE - 1);
+        assert!(history.at_least_in_recent(1, 1, board.zobrist));
+        assert!(history.at_least_in_recent(2, 3, board.zobrist));
+        assert!(history.at_least_in_recent(1, 3, board.zobrist));
 
         let board_empty = Board::default();
         history.push(board_empty.zobrist);
 
-        assert_eq!(history.count(board.zobrist), HISTORY_SIZE - 2);
-        assert_eq!(history.count(board_empty.zobrist), 1);
+        assert!(!history.at_least_in_recent(1, 1, board.zobrist));
+        assert!(history.at_least_in_recent(1, 2, board.zobrist));
+
+        assert_eq!(history._count(board.zobrist), HISTORY_SIZE - 2);
+        assert_eq!(history._count(board_empty.zobrist), 1);
+        assert!(history.at_least_in_recent(1, 3, board.zobrist));
+        assert!(history.at_least_in_recent(1, 20, board_empty.zobrist));
+        assert!(history.at_least_in_recent(1, 15, board_empty.zobrist));
+        assert!(history.at_least_in_recent(1, 1, board_empty.zobrist));
 
         for _ in 0..3 {
             history.push(board_empty.zobrist);
         }
 
-        assert_eq!(history.count(board_empty.zobrist), 4);
-        assert_eq!(history.count(board.zobrist), HISTORY_SIZE - 5);
+        assert_eq!(history._count(board_empty.zobrist), 4);
+        assert_eq!(history._count(board.zobrist), HISTORY_SIZE - 5);
     }
 
     #[test]
@@ -982,7 +1012,8 @@ mod tests {
         }
 
         // this is the third occurence, but beforehand there are two occurences
-        assert_eq!(board.history.count(board.zobrist), 2);
+        assert_eq!(board.history._count(board.zobrist), 2);
+        assert!(board.is_repetition(), "fen: {}", board.to_fen());
     }
 
     /// engine should take advantage of the three time repetition rule
@@ -1032,7 +1063,7 @@ mod tests {
         expected_bestmv.make(&mut board);
         eprintln!(
             "after expected mv, board repeated {} times",
-            board.history.count(board.zobrist)
+            board.history._count(board.zobrist)
         );
 
         assert_eq!(
