@@ -480,7 +480,7 @@ impl TimeLimits {
         // hard timeout (max)
         let mut hard_ms = 100_000;
         // soft timeout (default max)
-        let mut soft_ms = 1_200;
+        let mut soft_ms = 1_500;
 
         // in some situations we can think longer
         if eval.phase <= 13 {
@@ -488,9 +488,9 @@ impl TimeLimits {
             // opening
 
             soft_ms = if ourtime_ms > 300_000 {
-                2_200
+                3_000
             } else if ourtime_ms > 600_000 {
-                4_500
+                5_000
             } else if ourtime_ms > 1_200_000 {
                 8_000
             } else {
