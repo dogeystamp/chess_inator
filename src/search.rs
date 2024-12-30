@@ -363,6 +363,7 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Vec<M
                 quiesce: mm.quiesce,
             },
         );
+        anti_mv.unmake(board);
 
         // propagate hard stops
         if matches!(score, SearchEval::Stopped) {
@@ -376,7 +377,6 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Vec<M
             best_continuation = continuation;
         }
         alpha = max(alpha, abs_best.into());
-        anti_mv.unmake(board);
         if alpha >= beta && state.config.alpha_beta_on {
             // alpha-beta prune.
             //
@@ -595,4 +595,31 @@ pub fn is_quiescent_position(board: &Board, eval: SearchEval) -> bool {
     let abs_eval = EvalInt::from(eval) * EvalInt::from(board.turn.sign());
 
     (board.eval() - EvalInt::from(abs_eval)).abs() <= THRESHOLD.abs()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Test that running minmax does not alter the board.
+    #[test]
+    fn test_board_same() {
+        let (_tx, rx) = mpsc::channel();
+        let cache = TranspositionTable::new(1);
+        let mut engine_state = EngineState::new(
+            SearchConfig {
+                depth: 3,
+                ..Default::default()
+            },
+            rx,
+            cache,
+            TimeLimits::from_movetime(20),
+        );
+        let mut board =
+            Board::from_fen("2rq1rk1/pp1bbppp/3p4/4p1B1/2B1P1n1/1PN5/P1PQ1PPP/R3K2R w KQ - 1 14")
+                .unwrap();
+        let orig_board = board;
+        let (_line, _eval) = best_line(&mut board, &mut engine_state);
+        assert_eq!(board, orig_board)
+    }
 }
