@@ -219,6 +219,7 @@ async def main():
 
         if skipped:
             logging.info("Resuming at file '%s'.", file)
+            skipped = False
         else:
             logging.info("Reading file '%s'.", file)
 

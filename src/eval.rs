@@ -397,7 +397,7 @@ pub fn eval_metrics(board: &Board) -> EvalMetrics {
     let king_distance_eval =
         -advantage * i32::try_from(king_distance).unwrap() * max(7 - phase, 0) / 100;
 
-    let eval = pst_eval + king_distance_eval;
+    let eval = (pst_eval + king_distance_eval).clamp(i16::MIN.into(), i16::MAX.into());
 
     EvalMetrics {
         pst_eval,
