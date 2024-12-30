@@ -488,11 +488,11 @@ impl TimeLimits {
             // opening
 
             soft_ms = if ourtime_ms > 300_000 {
-                4_500
+                2_200
             } else if ourtime_ms > 600_000 {
-                8_000
+                4_500
             } else if ourtime_ms > 1_200_000 {
-                12_000
+                8_000
             } else {
                 soft_ms
             }
