@@ -10,7 +10,6 @@ import logging
 from torch.utils.data import Dataset, DataLoader
 from torch import nn
 from pathlib import Path
-from dataclasses import dataclass
 from scipy.optimize import curve_fit
 
 
@@ -135,28 +134,86 @@ class NNUE(nn.Module):
             nn.Linear(HIDDEN_SIZE, 1),
         )
 
-    def forward(self, x: pd.DataFrame):
-        features = x["board_features"]
-        output = self.linear_relu_stack(features)
-        return output
+    def forward(self, x):
+        logit = self.linear_relu_stack(x)
+        # i _think_ these logits can be interpreted as centipawns?
 
+        # anyways, return WDL space probability
+        return torch.sigmoid(logit)
 
-if __name__ == "__main__":
+device = (
+    "cuda"
+    if torch.cuda.is_available()
+    else "mps"
+    if torch.backends.mps.is_available()
+    else "cpu"
+)
+
+################################
+################################
+## neural net training
+################################
+################################
+
+LEARN_RATE = 1e-3
+BATCH_SIZE = 64
+EPOCHS = 5
+
+def train_loop(dataloader, model, loss_fn, optimizer):
+    model.train()
+    for batch_idx, batch in enumerate(dataloader):
+        x = batch["board_features"]
+        y = batch["expected_result"]
+        pred = model(x)
+        loss = loss_fn(pred, y)
+        loss.backward()
+        optimizer.step()
+        optimizer.zero_grad()
+
+        train_set_size = len(dataloader) 
+
+        if batch % 100 == 0:
+            loss = loss.item()
+            current = batch_idx * BATCH_SIZE + len(batch)
+            print(f"loss: {loss:>7f} [{current:>5d} / [{train_set_size:>5d}]")
+
+def test_loop(dataloader, model, loss_fn):
+    model.eval()
+    n_batches = len(dataloader)
+    test_loss = 0
+
+    with torch.no_grad():
+        for batch in dataloader:
+            x = batch["board_features"]
+            y = batch["expected_result"]
+            pred = model(x)
+            test_loss += loss_fn(pred, y).item()
+
+    test_loss /= n_batches
+    print(f"avg loss: {test_loss:>5f}\n")
+
+def main():
     full_dataset = ChessPositionDataset(Path("combined_training.tsv.gz"))
 
     train_dataset, test_dataset = torch.utils.data.random_split(
         full_dataset, [0.8, 0.2]
     )
 
-    train_dataloader = DataLoader(train_dataset, batch_size=64, shuffle=True)
-    test_dataloader = DataLoader(test_dataset, batch_size=64, shuffle=True)
-
-    device = (
-        "cuda"
-        if torch.cuda.is_available()
-        else "mps"
-        if torch.backends.mps.is_available()
-        else "cpu"
-    )
+    train_dataloader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
+    test_dataloader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=True)
 
     logging.info("Using device %s for training", device)
+
+    model = NNUE()
+
+    loss_fn = torch.nn.CrossEntropyLoss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=LEARN_RATE)
+
+    for epoch_idx in range(EPOCHS):
+        print(f"\nEPOCH {epoch_idx + 1} / {EPOCHS}\n---------------------------------")
+        train_loop(train_dataloader, model, loss_fn, optimizer)
+        test_loop(test_dataloader, model, loss_fn)
+
+
+if __name__ == "__main__":
+    main()
