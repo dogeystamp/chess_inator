@@ -160,6 +160,8 @@ async def worker(game_generator: AsyncIterator[pgn.Game]) -> None:
 
             await output_queue.put((board.fen(), tensor, int(eval_abs), wdl))
 
+    await engine.quit()
+
 
 async def analyse_games(file: Path):
     """Task that manages reading PGNs and analyzing them."""

@@ -22,7 +22,7 @@ from pathlib import Path
 
 parser = argparse.ArgumentParser()
 parser.add_argument("files", nargs="+", type=Path)
-parser.add_argument("--batch-size", type=int, help="Number of games to save in each output file.", default=8)
+parser.add_argument("--batch-size", type=int, help="Number of games to save in each output file. Set this to two to four times the amount of concurrent workers used in the processing step.", default=8)
 parser.add_argument("--output-folder", type=Path, help="Folder to save batched games in.", default=Path("batches"))
 args = parser.parse_args()
 
