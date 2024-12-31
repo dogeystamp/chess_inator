@@ -24,6 +24,14 @@ logging.basicConfig(level=logging.INFO)
 ################################
 
 
+LAMBDA = 0.4
+"""
+Interpolation coefficient between expected win probability, and real win probability.
+
+0 discards the engine label completely, and 1 discards the real game result completely.
+"""
+
+
 class ChessPositionDataset(Dataset):
     def __init__(self, data_file: Path):
         self.data = pd.read_csv(data_file, delimiter="\t")
@@ -32,13 +40,16 @@ class ChessPositionDataset(Dataset):
         # convert from (-1, 0, 1) to WDL-space (0, 0.5, 1)
         self.data["game_result"] = (self.data["game_result"] + 1) / 2
 
-        # tune sigmoid
-        self.k = tune_sigmoid(self.data["centipawns"], self.data["game_result"])
-
         # convert features to tensors
         self.data["board_features"] = self.data["board_features"].apply(
             lambda x: torch.as_tensor([1 if c == "1" else 0 for c in x])
         )
+
+        # tune sigmoid
+        self.k = tune_sigmoid(self.data["centipawns"], self.data["game_result"])
+
+        # interpolate engine analysis and real result in WDL-space
+        self.data["expected_result"] = (LAMBDA) * np_sigmoid(self.data["centipawns"], self.k) + (1 - LAMBDA) * self.data["game_result"]
 
     def __len__(self):
         return len(self.data)
@@ -49,14 +60,19 @@ class ChessPositionDataset(Dataset):
     def plot_sigmoid(self):
         """Display the curve that correlates centipawns to win-draw-loss."""
         import matplotlib.pyplot as plt
-        plt.plot(self.data["centipawns"], self.data["game_result"], "o")
+
+        plt.plot(self.data["centipawns"], self.data["game_result"], "o", label="Real result")
+        plt.plot(self.data["centipawns"], self.data["expected_result"], "o", label="Interpolated result")
+
         x = np.linspace(min(self.data["centipawns"]), max(self.data["centipawns"]))
-
-        def np_sigmoid(x, k):
-            return 1 / (1 + np.exp(-x/k))
-
         y = np_sigmoid(x, self.k)
-        plt.plot(x, y)
+        plt.plot(x, y, label="Sigmoid")
+
+        plt.legend()
+        plt.xlabel("Centipawn evaluation")
+        plt.ylabel("Win-Draw-Loss evaluation")
+
+        plt.show()
 
 
 ################################
@@ -64,13 +80,8 @@ class ChessPositionDataset(Dataset):
 ################################
 
 
-def sigmoid_series(x, k):
-    """
-    Sigmoid for series values.
-
-    Prefer `torch.sigmoid` for tensor values.
-    """
-    return torch.sigmoid(torch.tensor(x / k))
+def np_sigmoid(x, k):
+    return 1 / (1 + np.exp(-x/k))
 
 
 def tune_sigmoid(cp, wdl) -> np.double:
@@ -98,7 +109,7 @@ def tune_sigmoid(cp, wdl) -> np.double:
     Parameter K of the sigmoid.
     """
 
-    popt, pcov = curve_fit(sigmoid_series, cp, wdl, [100], method="dogbox")
+    popt, pcov = curve_fit(np_sigmoid, cp, wdl, [100], method="dogbox")
     return popt[0]
 
 
