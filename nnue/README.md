@@ -7,12 +7,15 @@ Both of these sources provide games in PGN format.
 
 This folder includes the following scripts:
 - `s1_batch_pgn_data.py`: Combine and convert big PGN files into small chunked files.
+    - Batches should ideally be a few times bigger than the number of workers
+      you have. Big batches have less overhead, but you lose more progress when
+      interrupting the processing step.
 - `s2_process_pgn_data.py`: Convert PGN data into a format suitable for training.
 
 Example training pipeline:
 ```bash
 # chunk all the PGN files in `games/`. outputs by default to `batches/batch%d.pgn`.
-./s1_batch_pgn_data.py games/*.pgn
+./s1_batch_pgn_data.py --batch-size 32 games/*.pgn
 
 # analyze batches to turn them into training data. outputs by default to train_data/batch%d.tsv.gz.
 # set max-workers to the number of hardware threads / cores you have.
