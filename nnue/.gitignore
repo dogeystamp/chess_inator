@@ -1,3 +1,4 @@
 batches/
 venv/
 train_data/
+__pycache__/

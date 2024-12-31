@@ -18,8 +18,6 @@ import itertools
 
 from pathlib import Path
 
-"""Games to include per file in output."""
-
 parser = argparse.ArgumentParser()
 parser.add_argument("files", nargs="+", type=Path)
 parser.add_argument("--batch-size", type=int, help="Number of games to save in each output file. Set this to two to four times the amount of concurrent workers used in the processing step.", default=8)
