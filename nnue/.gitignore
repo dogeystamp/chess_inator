@@ -2,4 +2,4 @@ batches/
 venv/
 train_data/
 __pycache__/
-trained_weights.pth
+weights.pth

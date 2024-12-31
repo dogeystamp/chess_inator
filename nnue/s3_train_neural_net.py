@@ -34,13 +34,13 @@ parser.add_argument(
     "--save",
     type=Path,
     help="Path to save trained model to.",
-    default=Path("trained_weights.pth"),
+    default=Path("weights.pth"),
 )
 parser.add_argument(
     "--load",
     type=Path,
     help="Path to load trained model from.",
-    default=Path("trained_weights.pth"),
+    default=Path("weights.pth"),
 )
 
 
@@ -51,7 +51,7 @@ parser.add_argument(
 ################################
 
 
-LAMBDA = 0.4
+LAMBDA = 0.75
 """
 Interpolation coefficient between expected win probability, and real win probability.
 
@@ -114,11 +114,18 @@ class ChessPositionDataset(Dataset):
             label="Interpolated result",
         )
 
-        x = np.linspace(min(self.data["centipawns"]), max(self.data["centipawns"]))
+        min_x = min(self.data["centipawns"])
+        max_x = max(self.data["centipawns"])
+
+        x = np.linspace(min_x, max_x)
         y = np_sigmoid(x, self.k)
         plt.plot(x, y, label="Sigmoid")
 
+        plt.plot([0, 0], [0, 1], linestyle="dashed", color="gray")
+        plt.plot([min_x, max_x], [0.5, 0.5], linestyle="dashed", color="gray")
+
         plt.legend()
+        plt.title(f"WDL-CP sigmoid (k={self.k:.2f}, n={len(self.data)})")
         plt.xlabel("Centipawn evaluation")
         plt.ylabel("Win-Draw-Loss evaluation")
 
@@ -193,7 +200,7 @@ class NNUE(nn.Module):
 
     def forward(self, x):
         logit = self.linear_relu_stack(x)
-        # i _think_ these logits can be interpreted as centipawns?
+        # this logit, times k, gives a centipawn evaluation
 
         # return WDL space probability
         return torch.sigmoid(logit / self.k)
@@ -215,7 +222,8 @@ device = (
 
 LEARN_RATE = 1e-3
 BATCH_SIZE = 64
-EPOCHS = 5
+EPOCHS = 50
+
 
 def get_x_y_from_batch(batch):
     """Returns training input (X) and label (Y) for a given batch."""
@@ -223,6 +231,7 @@ def get_x_y_from_batch(batch):
     y = torch.from_numpy(np.stack(batch["expected_result"].values)).unsqueeze(-1)
 
     return x, y
+
 
 def train_loop(dataloader, model, loss_fn, optimizer):
     model.train()
@@ -289,24 +298,62 @@ def train(
     loss_fn = torch.nn.MSELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=LEARN_RATE)
 
-    if load_path and load_path.is_file():
-        checkpoint = torch.load(load_path, weights_only=True)
-        model.load_state_dict(checkpoint["model_state_dict"])
-        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+    epoch_start =  0
 
-    for epoch_idx in range(EPOCHS):
+    if load_path and load_path.is_file():
+        saved_epoch = load_model(load_path, model, optimizer)
+        if saved_epoch:
+            epoch_start = saved_epoch
+
+    for epoch_idx in range(epoch_start, EPOCHS):
         print(f"\nEPOCH {epoch_idx + 1} / {EPOCHS}\n---------------------------------")
         train_loop(train_dataloader, model, loss_fn, optimizer)
         test_loop(test_dataloader, model, loss_fn)
+        if (epoch_idx + 1) % 10 == 0:
+            if save_path:
+                save_model(save_path, model, optimizer, epoch_idx)
 
     if save_path:
-        torch.save(
-            dict(
-                model_state_dict=model.state_dict(),
-                optimizer_state_dict=optimizer.state_dict(),
-            ),
-            save_path,
-        )
+        save_model(save_path, model, optimizer, None)
+
+
+################################
+################################
+## saving/loading models
+################################
+################################
+
+
+def load_model(load_path: Path, model: NNUE, optimizer: torch.optim.Optimizer | None) -> int | None:
+    """
+    Load a model checkpoint.
+
+    Returns
+    -------
+    Epoch number, if saved.
+    """
+
+    checkpoint = torch.load(load_path, weights_only=True)
+    model.load_state_dict(checkpoint["model_state_dict"])
+    if optimizer:
+        if state := checkpoint["optimizer_state_dict"]:
+            optimizer.load_state_dict(state)
+    return checkpoint.get("epoch")
+
+
+def save_model(save_path: Path, model: NNUE, optimizer: torch.optim.Optimizer | None, epoch: int | None):
+    """Save a model as a checkpoint."""
+
+    optim_state = optimizer.state_dict() if optimizer else None
+
+    torch.save(
+        dict(
+            model_state_dict=model.state_dict(),
+            optimizer_state_dict=None,
+            epoch=epoch,
+        ),
+        save_path,
+    )
 
 
 ################################
