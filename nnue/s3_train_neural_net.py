@@ -31,6 +31,15 @@ class Position:
     cp_eval: np.double
     """Centipawn evaluation (white perspective)."""
 
+    result: np.double
+    """
+    Game result.
+
+    - -1: black win
+    - 0: draw
+    - 1: white win
+    """
+
     expected_points: np.double
     """
     Points expected to be gained for white from the game, based on centipawn evaluation.
@@ -58,12 +67,16 @@ class ChessPositionDataset(Dataset):
         row = self.data.iloc[idx]
 
         eval = np.double(row.iloc[2])
+        result=row.iloc[3]
+
+        actual_points = (result + 1) / 2
 
         return Position(
             fen=row.iloc[0],
             board=torch.as_tensor([1 if c == "1" else 0 for c in row.iloc[1]]),
             cp_eval=eval,
-            expected_points=sigmoid(eval/100),
+            result=result,
+            expected_points=(sigmoid(eval/100) + actual_points)/2,
         )
 
 if __name__ == "__main__":
