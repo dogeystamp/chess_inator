@@ -190,6 +190,9 @@ def tune_sigmoid(cp, wdl) -> np.double:
 ################################
 ################################
 
+ARCHITECTURE = "A01_768_3_1"
+"""Unique ID / version for this architecture."""
+
 INPUT_SIZE = 2 * 6 * 64  # 768
 """Board feature input size."""
 
@@ -198,9 +201,10 @@ HIDDEN_SIZE = 3
 
 
 class NNUE(nn.Module):
-    def __init__(self, k) -> None:
+    def __init__(self) -> None:
         super().__init__()
-        self.k = k
+        self.k: np.double | None = None
+        self.arch = ARCHITECTURE
         self.linear_relu_stack = nn.Sequential(
             nn.Linear(INPUT_SIZE, HIDDEN_SIZE, dtype=torch.double),
             nn.ReLU(),
@@ -276,7 +280,6 @@ def test_loop(dataloader, model, loss_fn):
 
 
 def train(
-    full_dataset: ChessPositionDataset,
     model: NNUE,
     save_path: Path | None,
     load_path: Path | None,
@@ -284,6 +287,9 @@ def train(
     """
     Train the model's parameters.
     """
+
+    full_dataset = ChessPositionDataset(args.datafile)
+    model.k = full_dataset.k
 
     train_dataset, test_dataset = torch.utils.data.random_split(
         full_dataset, [0.8, 0.2]
@@ -302,7 +308,7 @@ def train(
         collate_fn=collate_chess_positions,
     )
 
-    logging.info("Using device %s for training", device)
+    logging.info("Using device '%s' for training", device)
 
     loss_fn = torch.nn.MSELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=LEARN_RATE)
@@ -310,20 +316,19 @@ def train(
     epoch_start =  0
 
     if load_path and load_path.is_file():
+        logging.info("Loading saved model from '%s'...", load_path)
         saved_epoch = load_model(load_path, model, optimizer)
-        if saved_epoch:
-            epoch_start = saved_epoch
+        if saved_epoch is not None:
+            logging.info("Last session ended with epoch %d.", saved_epoch + 1)
+            epoch_start = saved_epoch + 1
 
     for epoch_idx in range(epoch_start, EPOCHS):
         print(f"\nEPOCH {epoch_idx + 1} / {EPOCHS}\n---------------------------------")
         train_loop(train_dataloader, model, loss_fn, optimizer)
         test_loop(test_dataloader, model, loss_fn)
-        if (epoch_idx + 1) % 10 == 0:
-            if save_path:
-                save_model(save_path, model, optimizer, epoch_idx)
-
-    if save_path:
-        save_model(save_path, model, optimizer, None)
+        if save_path:
+            save_model(save_path, model, optimizer, epoch_idx)
+            logging.info("Saved progress to '%s'.", save_path)
 
 
 ################################
@@ -343,7 +348,13 @@ def load_model(load_path: Path, model: NNUE, optimizer: torch.optim.Optimizer | 
     """
 
     checkpoint = torch.load(load_path, weights_only=True)
+    if arch := checkpoint.get("arch"):
+        if arch != model.arch:
+            raise ValueError(f"Tried to load from arch '{arch}', but was expecting '{model.arch}'. There is a version mismatch.")
     model.load_state_dict(checkpoint["model_state_dict"])
+    model.k = model.k or checkpoint["k"].detach().numpy().item()
+    if not model.k:
+        raise ValueError("Missing the sigmoid K parameter.")
     if optimizer:
         if state := checkpoint["optimizer_state_dict"]:
             optimizer.load_state_dict(state)
@@ -358,8 +369,10 @@ def save_model(save_path: Path, model: NNUE, optimizer: torch.optim.Optimizer | 
     torch.save(
         dict(
             model_state_dict=model.state_dict(),
-            optimizer_state_dict=None,
+            optimizer_state_dict=optim_state,
             epoch=epoch,
+            k=torch.as_tensor(model.k),
+            arch=model.arch,
         ),
         save_path,
     )
@@ -372,7 +385,5 @@ def save_model(save_path: Path, model: NNUE, optimizer: torch.optim.Optimizer | 
 if __name__ == "__main__":
     args = parser.parse_args()
 
-    full_dataset = ChessPositionDataset(args.datafile)
-    model = NNUE(full_dataset.k)
-
-    train(full_dataset, model, args.save, args.load)
+    model = NNUE()
+    train(model, args.save, args.load)
