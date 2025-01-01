@@ -11,7 +11,7 @@ You should have received a copy of the GNU General Public License along with che
 Copyright © 2024 dogeystamp <dogeystamp@disroot.org>
 */
 
-//! Static position evaluation (neural network based eval).
+//! Neural network tools.
 //!
 //! # Neural net architecture
 //!
@@ -37,8 +37,8 @@ Copyright © 2024 dogeystamp <dogeystamp@disroot.org>
 //! directory's README file.
 
 use crate::prelude::*;
-use std::fmt::Display;
 use crate::serialization::ConstCursor;
+use std::fmt::Display;
 
 /// Network architecture string. Reject any weights file that does not fulfill this.
 const ARCHITECTURE: &[u8] = "A01_768_3_1\x1b".as_bytes();
@@ -132,6 +132,58 @@ impl Display for InputTensor {
     }
 }
 
+/// Neural network.
+#[derive(Debug)]
+pub(crate) struct Nnue<'a> {
+    params: &'a NNUEParameters,
+    l1: [f64; L1_SIZE],
+    out: [f64; OUT_SIZE],
+}
+
+pub(crate) fn relu(x: f64) -> f64 {
+    x.max(0.)
+}
+
+impl Nnue<'_> {
+    /// Turn on/off a bit in the input tensor.
+    pub fn bit_set(&mut self, i: usize, on: bool) {
+        debug_assert!(i < INP_TENSOR_SIZE);
+        for j in 0..L1_SIZE {
+            if on {
+                self.l1[j] += self.params.l1_w[j][i];
+            } else {
+                self.l1[j] -= self.params.l1_w[j][i];
+            }
+        }
+
+        // activations
+        let mut z_l1: [f64; L1_SIZE] = [0.; L1_SIZE];
+        for (j, z) in z_l1.iter_mut().enumerate() {
+            *z = relu(self.l1[j])
+        }
+
+        for k in 0..OUT_SIZE {
+            self.out[k] = self.params.out_b[k];
+            for (j, z) in z_l1.iter().enumerate() {
+                self.out[k] += self.params.out_w[k][j] * z;
+            }
+        }
+    }
+
+    /// Centipawn evaluation from neural net.
+    pub fn output(&self) -> EvalInt {
+        self.out[0].round() as EvalInt
+    }
+
+    pub fn new() -> Self {
+        Nnue {
+            l1: WEIGHTS.l1_b,
+            out: WEIGHTS.out_b,
+            params: &WEIGHTS,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -143,5 +195,24 @@ mod tests {
         let mut expected = [false; INP_TENSOR_SIZE];
         expected[INP_TENSOR_SIZE / N_COLORS + 1 + N_SQUARES] = true;
         assert_eq!(tensor.0, expected);
+    }
+
+    /// Test that weights loaded properly, and our inference works.
+    #[test]
+    fn test_weight_loading() {
+        let mut nnue = Nnue::new();
+        for i in 0..INP_TENSOR_SIZE {
+            nnue.bit_set(i, true);
+            nnue.bit_set(i, false);
+            nnue.bit_set(i, true);
+        }
+
+        let epsilon = 1e-9;
+
+        let got = nnue.out[0];
+        let expected = nnue.params.sanity_check[0];
+
+
+        assert!((got - expected).abs() < epsilon, "NNUE state:\n{:?}\n\ngot {}, expected {}", nnue, got, expected)
     }
 }

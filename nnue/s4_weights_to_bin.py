@@ -94,12 +94,14 @@ if __name__ == "__main__":
             exit(1)
 
         all_ones_res = np.double(
-            model(torch.ones([s3nn.INPUT_SIZE], dtype=torch.double)).item()
+            (
+                model.linear_relu_stack(torch.ones([s3nn.INPUT_SIZE], dtype=torch.double))
+            ).item()
         ).astype("<f8", casting="equiv")
 
         print(f"sanity check value: {all_ones_res}")
         print(
-            "running the model with an all ones input should give you the above value."
+            "running the model with an all ones input should give you the above logit value (i.e. before the sigmoid)."
         )
         print(
             "please be careful of endianness; this .bin file stores in little-endian."
