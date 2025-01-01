@@ -16,6 +16,7 @@ import pandas as pd
 import numpy as np
 import logging
 import argparse
+import csv
 
 from torch.utils.data import Dataset, DataLoader
 from torch import nn
@@ -50,6 +51,11 @@ parser.add_argument(
     type=Path,
     help="Path to load trained model from.",
     default=Path("weights.pth"),
+)
+parser.add_argument(
+    "--log",
+    type=Path,
+    help="Path to log (as .csv) the results of the loss function.",
 )
 
 
@@ -246,28 +252,50 @@ def get_x_y_from_batch(batch):
     return x, y
 
 
-def train_loop(dataloader, model, loss_fn, optimizer):
+def train_loop(dataloader, model, loss_fn, optimizer) -> np.double:
+    """
+    Train model for one epoch.
+
+    Returns
+    -------
+    Average train loss for the epoch.
+    """
+
     model.train()
+
+    avg_loss = np.double(0)
+
     for batch_idx, batch in enumerate(dataloader):
+        train_set_size = len(dataloader.dataset)
+
         x, y = get_x_y_from_batch(batch)
         pred = model(x)
         loss = loss_fn(pred, y)
+        avg_loss += loss.detach().item()
         loss.backward()
         optimizer.step()
         optimizer.zero_grad()
-
-        train_set_size = len(dataloader.dataset)
 
         if batch_idx % 10 == 0:
             loss = loss.item()
             current = batch_idx * BATCH_SIZE + len(x)
             print(f"loss: {loss:>7f} [{current:>5d} / {train_set_size:>5d}]")
 
+    avg_loss /= len(dataloader)
+    return avg_loss
 
-def test_loop(dataloader, model, loss_fn):
+
+def test_loop(dataloader, model, loss_fn) -> np.double:
+    """
+    Test the model after one epoch.
+
+    Returns
+    -------
+    Average test/validation loss.
+    """
     model.eval()
     n_batches = len(dataloader)
-    test_loss = 0
+    test_loss = np.double(0)
 
     with torch.no_grad():
         for batch in dataloader:
@@ -276,13 +304,15 @@ def test_loop(dataloader, model, loss_fn):
             test_loss += loss_fn(pred, y).item()
 
     test_loss /= n_batches
-    print(f"avg loss: {test_loss:>5f}\n")
+    print(f"avg test loss: {test_loss:>5f}\n")
+    return test_loss
 
 
 def train(
     model: NNUE,
-    save_path: Path | None,
-    load_path: Path | None,
+    save_path: Path | None = None,
+    load_path: Path | None = None,
+    log_path: Path | None = None,
 ):
     """
     Train the model's parameters.
@@ -313,7 +343,7 @@ def train(
     loss_fn = torch.nn.MSELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=LEARN_RATE)
 
-    epoch_start =  0
+    epoch_start = 0
 
     if load_path and load_path.is_file():
         logging.info("Loading saved model from '%s'...", load_path)
@@ -324,11 +354,32 @@ def train(
 
     for epoch_idx in range(epoch_start, EPOCHS):
         print(f"\nEPOCH {epoch_idx + 1} / {EPOCHS}\n---------------------------------")
-        train_loop(train_dataloader, model, loss_fn, optimizer)
-        test_loop(test_dataloader, model, loss_fn)
+        train_loss = train_loop(train_dataloader, model, loss_fn, optimizer)
+        test_loss = test_loop(test_dataloader, model, loss_fn)
         if save_path:
             save_model(save_path, model, optimizer, epoch_idx)
             logging.info("Saved progress to '%s'.", save_path)
+        if log_path:
+            if not log_path.exists():
+                with log_path.open("w") as f:
+                    writer = csv.writer(f)
+                    writer.writerow(["epoch", "train_loss", "test_loss"])
+            with log_path.open("a") as f:
+                writer = csv.writer(f)
+                writer.writerow([epoch_idx, train_loss, test_loss])
+
+
+def visualize_train_log(log_path: Path = Path("log_training.csv")):
+    """Visualize the training loss log."""
+
+    import pandas as pd
+    import matplotlib.pyplot as plt
+
+    df = pd.read_csv(log_path)
+    df = df.set_index("epoch")
+    print(df)
+    df.plot()
+    plt.show()
 
 
 ################################
@@ -338,7 +389,9 @@ def train(
 ################################
 
 
-def load_model(load_path: Path, model: NNUE, optimizer: torch.optim.Optimizer | None) -> int | None:
+def load_model(
+    load_path: Path, model: NNUE, optimizer: torch.optim.Optimizer | None
+) -> int | None:
     """
     Load a model checkpoint.
 
@@ -350,7 +403,9 @@ def load_model(load_path: Path, model: NNUE, optimizer: torch.optim.Optimizer | 
     checkpoint = torch.load(load_path, weights_only=True)
     if arch := checkpoint.get("arch"):
         if arch != model.arch:
-            raise ValueError(f"Tried to load from arch '{arch}', but was expecting '{model.arch}'. There is a version mismatch.")
+            raise ValueError(
+                f"Tried to load from arch '{arch}', but was expecting '{model.arch}'. There is a version mismatch."
+            )
     model.load_state_dict(checkpoint["model_state_dict"])
     model.k = model.k or checkpoint["k"].detach().numpy().item()
     if not model.k:
@@ -361,7 +416,12 @@ def load_model(load_path: Path, model: NNUE, optimizer: torch.optim.Optimizer | 
     return checkpoint.get("epoch")
 
 
-def save_model(save_path: Path, model: NNUE, optimizer: torch.optim.Optimizer | None, epoch: int | None):
+def save_model(
+    save_path: Path,
+    model: NNUE,
+    optimizer: torch.optim.Optimizer | None,
+    epoch: int | None,
+):
     """Save a model as a checkpoint."""
 
     optim_state = optimizer.state_dict() if optimizer else None
@@ -386,4 +446,4 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     model = NNUE()
-    train(model, args.save, args.load)
+    train(model, args.save, args.load, args.log)

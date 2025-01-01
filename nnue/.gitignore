@@ -3,3 +3,4 @@ venv/
 train_data/
 __pycache__/
 weights.pth
+log_training.csv
