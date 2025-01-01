@@ -140,6 +140,7 @@ class ChessPositionDataset(Dataset):
         plt.plot([min_x, max_x], [0.5, 0.5], linestyle="dashed", color="gray")
 
         plt.legend()
+        plt.grid()
         plt.title(f"WDL-CP sigmoid (k={self.k:.2f}, n={len(self.data)})")
         plt.xlabel("Centipawn evaluation")
         plt.ylabel("Win-Draw-Loss evaluation")
@@ -241,7 +242,7 @@ device = (
 
 LEARN_RATE = 1e-3
 BATCH_SIZE = 64
-EPOCHS = 120
+EPOCHS = 200
 
 
 def get_x_y_from_batch(batch):
@@ -383,6 +384,8 @@ def visualize_train_log(log_path: Path = Path("log_training.csv")):
     print(df)
     df.plot()
     plt.ylabel("loss")
+    plt.title("Training progress")
+    plt.grid()
     plt.show()
 
 
