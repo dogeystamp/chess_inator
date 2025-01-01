@@ -241,7 +241,7 @@ device = (
 
 LEARN_RATE = 1e-3
 BATCH_SIZE = 64
-EPOCHS = 50
+EPOCHS = 120
 
 
 def get_x_y_from_batch(batch):
@@ -276,7 +276,7 @@ def train_loop(dataloader, model, loss_fn, optimizer) -> np.double:
         optimizer.step()
         optimizer.zero_grad()
 
-        if batch_idx % 10 == 0:
+        if batch_idx % 32 == 0:
             loss = loss.item()
             current = batch_idx * BATCH_SIZE + len(x)
             print(f"loss: {loss:>7f} [{current:>5d} / {train_set_size:>5d}]")
@@ -318,11 +318,14 @@ def train(
     Train the model's parameters.
     """
 
+    logging.info("Loading dataset...")
     full_dataset = ChessPositionDataset(args.datafile)
+    logging.info("Loaded dataset (%d rows).", len(full_dataset))
     model.k = full_dataset.k
 
+    generator = torch.Generator().manual_seed(42)
     train_dataset, test_dataset = torch.utils.data.random_split(
-        full_dataset, [0.8, 0.2]
+        full_dataset, [0.8, 0.2], generator=generator
     )
 
     train_dataloader = DataLoader(
@@ -338,7 +341,7 @@ def train(
         collate_fn=collate_chess_positions,
     )
 
-    logging.info("Using device '%s' for training", device)
+    logging.info("Using device '%s' for training.", device)
 
     loss_fn = torch.nn.MSELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=LEARN_RATE)
@@ -379,6 +382,7 @@ def visualize_train_log(log_path: Path = Path("log_training.csv")):
     df = df.set_index("epoch")
     print(df)
     df.plot()
+    plt.ylabel("loss")
     plt.show()
 
 
