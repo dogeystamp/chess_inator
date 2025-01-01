@@ -46,4 +46,8 @@ zcat train_data/*.tsv.gz | gzip > combined_training.tsv.gz
 # this process may be interrupted and resumed, at the cost of losing an
 # unfinished epoch.
 ./s3_train_neural_net.py combined_training.tsv.gz --log log_training.csv
+
+# convert the finished weights to `.bin` format
+./s4_weights_to_bin.py weights.pth
+cp weights.bin ../src/
 ```

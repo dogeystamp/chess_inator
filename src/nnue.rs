@@ -32,12 +32,67 @@ Copyright © 2024 dogeystamp <dogeystamp@disroot.org>
 //! updatable neural network), we only store the hidden layer's state, and whenever we want to flip
 //! a bit in the input layer, we directly add/subtract the corresponding weight from the hidden
 //! layer.
+//!
+//! For more information about training and the neural net architecture itself, consult the `nnue/`
+//! directory's README file.
 
 use crate::prelude::*;
 use std::fmt::Display;
+use crate::serialization::ConstCursor;
+
+/// Network architecture string. Reject any weights file that does not fulfill this.
+const ARCHITECTURE: &[u8] = "A01_768_3_1\x1b".as_bytes();
 
 /// Size of the input feature tensor.
 pub const INP_TENSOR_SIZE: usize = N_COLORS * N_PIECES * N_SQUARES;
+/// Size of the hidden layer.
+const L1_SIZE: usize = 3;
+/// Size of the output layer.
+const OUT_SIZE: usize = 1;
+
+/// Expected size of the weights binary.
+///
+/// - Size of all parameters
+/// - Size of the ARCHITECTURE string (plus ESC byte)
+const BIN_SIZE: usize = std::mem::size_of::<NNUEParameters>() + ARCHITECTURE.len();
+
+/// All weights and biases of the neural network.
+#[derive(Debug)]
+struct NNUEParameters {
+    sanity_check: [f64; 1],
+    l1_w: [[f64; INP_TENSOR_SIZE]; L1_SIZE],
+    l1_b: [f64; L1_SIZE],
+    out_w: [[f64; L1_SIZE]; OUT_SIZE],
+    out_b: [f64; OUT_SIZE],
+}
+
+/// Parameters, in packed binary form.
+const WEIGHTS_BIN: &[u8; BIN_SIZE] = include_bytes!("weights.bin");
+
+impl NNUEParameters {
+    const fn from_bytes(bytes: &[u8; BIN_SIZE]) -> Self {
+        let mut cursor = ConstCursor::from_bytes(bytes);
+        let arch_string: [u8; ARCHITECTURE.len()] = cursor.read_u8();
+        let mut i = 0;
+        while i < arch_string.len() {
+            if arch_string[i] != ARCHITECTURE[i] {
+                panic!("Incompatible weights for this version of the engine.")
+            }
+            i += 1;
+        }
+
+        NNUEParameters {
+            sanity_check: cursor.read_f64(),
+            l1_w: cursor.read2d_f64(),
+            l1_b: cursor.read_f64(),
+            out_w: cursor.read2d_f64(),
+            out_b: cursor.read_f64(),
+        }
+    }
+}
+
+const WEIGHTS: NNUEParameters = NNUEParameters::from_bytes(WEIGHTS_BIN);
+
 #[derive(Debug, PartialEq, Eq)]
 pub struct InputTensor([bool; INP_TENSOR_SIZE]);
 

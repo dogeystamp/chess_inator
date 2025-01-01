@@ -23,6 +23,7 @@ pub mod fen;
 mod hash;
 pub mod movegen;
 pub mod nnue;
+mod serialization;
 pub mod random;
 pub mod search;
 
