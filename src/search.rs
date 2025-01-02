@@ -179,6 +179,8 @@ struct MinmaxState {
     beta: Option<EvalInt>,
     /// quiescence search flag
     quiesce: bool,
+    /// flag to disable stopping on the first depth, to avoid not having a move
+    allow_stop: bool,
 }
 
 /// Search the game tree to find the absolute (positive good) move and corresponding eval for the
@@ -196,8 +198,8 @@ struct MinmaxState {
 ///
 /// The best line (in reverse move order), and its corresponding absolute eval for the current player.
 fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Vec<Move>, SearchEval) {
-    // these operations are relatively expensive, so only run them occasionally
-    if state.node_count % (1 << 12) == 0 {
+    // occasionally check if we should stop the engine
+    if mm.allow_stop && state.node_count % (1 << 12) == 0 {
         // respect the hard stop if given
         match state.rx_engine.try_recv() {
             Ok(msg) => match msg {
@@ -256,6 +258,7 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Vec<M
                     alpha: mm.alpha,
                     beta: mm.beta,
                     quiesce: true,
+                    allow_stop: mm.allow_stop,
                 },
             );
         }
@@ -361,6 +364,7 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Vec<M
                 alpha: Some(-beta),
                 beta: Some(-alpha),
                 quiesce: mm.quiesce,
+                allow_stop: mm.allow_stop,
             },
         );
         anti_mv.unmake(board);
@@ -435,6 +439,7 @@ fn iter_deep(board: &mut Board, state: &mut EngineState) -> (Vec<Move>, SearchEv
             alpha: None,
             beta: None,
             quiesce: false,
+            allow_stop: false,
         },
     );
 
@@ -447,6 +452,7 @@ fn iter_deep(board: &mut Board, state: &mut EngineState) -> (Vec<Move>, SearchEv
                 alpha: None,
                 beta: None,
                 quiesce: false,
+                allow_stop: true,
             },
         );
 
