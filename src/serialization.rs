@@ -78,7 +78,7 @@ impl<'a, const BUF_SIZE: usize> ConstCursor<'a, BUF_SIZE> {
         out_buf
     }
 
-    read_type!(f32, read_f32, read2d_f32);
+    read_type!(crate::nnue::Float, read_float, read2d_float);
 
     pub const fn from_bytes(buf: &'a[u8; BUF_SIZE]) -> Self {
         Self {

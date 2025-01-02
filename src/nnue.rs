@@ -41,7 +41,7 @@ use crate::serialization::ConstCursor;
 use std::fmt::Display;
 
 // alias to easily change precision
-type Float = f32;
+pub(crate) type Float = f32;
 
 /// Network architecture string. Reject any weights file that does not fulfill this.
 const ARCHITECTURE: &[u8] = "A01_768_3_1_q<f4\x1b".as_bytes();
@@ -88,11 +88,11 @@ impl NNUEParameters {
         }
 
         NNUEParameters {
-            _sanity_check: cursor.read_f32(),
-            l1_w: cursor.read2d_f32(),
-            l1_b: cursor.read_f32(),
-            out_w: cursor.read2d_f32(),
-            out_b: cursor.read_f32(),
+            _sanity_check: cursor.read_float(),
+            l1_w: cursor.read2d_float(),
+            l1_b: cursor.read_float(),
+            out_w: cursor.read2d_float(),
+            out_b: cursor.read_float(),
         }
     }
 }
