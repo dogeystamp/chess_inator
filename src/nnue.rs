@@ -141,8 +141,8 @@ impl Display for InputTensor {
 /// Neural network.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Nnue {
+    /// Accumulator. This is the only persistent data; everything else is conceptual.
     l1: [Float; L1_SIZE],
-    out: [Float; OUT_SIZE],
 }
 
 impl PartialEq for Nnue {
@@ -169,19 +169,6 @@ impl Nnue {
                 self.l1[j] -= WEIGHTS.l1_w[j][i];
             }
         }
-
-        // activations
-        let mut z_l1: [Float; L1_SIZE] = [0.; L1_SIZE];
-        for (j, z) in z_l1.iter_mut().enumerate() {
-            *z = relu(self.l1[j])
-        }
-
-        for k in 0..OUT_SIZE {
-            self.out[k] = WEIGHTS.out_b[k];
-            for (j, z) in z_l1.iter().enumerate() {
-                self.out[k] += WEIGHTS.out_w[k][j] * z;
-            }
-        }
     }
 
     pub fn add_piece(&mut self, pc: ColPiece, sq: Square) {
@@ -192,15 +179,34 @@ impl Nnue {
         self.bit_set(InputTensor::idx(pc, sq), false);
     }
 
+    /// Raw logits from neural net.
+    pub fn output_raw(&self) -> Float {
+        // activations
+        let mut z_l1: [Float; L1_SIZE] = [0.; L1_SIZE];
+        for (j, z) in z_l1.iter_mut().enumerate() {
+            *z = relu(self.l1[j])
+        }
+
+        let mut out: [Float; OUT_SIZE] = [0.; OUT_SIZE];
+
+        for (k, out_node) in out.iter_mut().enumerate() {
+            *out_node = WEIGHTS.out_b[k];
+            for (j, z) in z_l1.iter().enumerate() {
+                *out_node += WEIGHTS.out_w[k][j] * z;
+            }
+        }
+
+        out[0]
+    }
+
     /// Centipawn evaluation from neural net.
     pub fn output(&self) -> EvalInt {
-        self.out[0].round() as EvalInt
+        self.output_raw() as EvalInt
     }
 
     pub fn new() -> Self {
         Nnue {
             l1: WEIGHTS.l1_b,
-            out: WEIGHTS.out_b,
         }
     }
 }
@@ -236,7 +242,7 @@ mod tests {
 
         let epsilon = 1.;
 
-        let got = nnue.out[0];
+        let got = nnue.output_raw();
         let expected = WEIGHTS._sanity_check[0];
 
         assert!((got - expected).abs() < epsilon, "NNUE state:\n{:?}\n\ngot {:?}, expected {:?}", nnue, got, expected)
