@@ -26,6 +26,21 @@ from scipy.optimize import curve_fit
 
 logging.basicConfig(level=logging.INFO)
 
+################################
+## hyperparameters
+################################
+
+LAMBDA = 0.97
+"""
+Interpolation coefficient between expected win probability, and real win probability.
+
+0 discards the engine label completely, and 1 discards the real game result completely.
+"""
+
+LEARN_RATE = 1e-3
+BATCH_SIZE = 64
+EPOCHS = 18
+
 
 ################################
 ################################
@@ -64,14 +79,6 @@ parser.add_argument(
 ## Data loading / parsing
 ################################
 ################################
-
-
-LAMBDA = 0.97
-"""
-Interpolation coefficient between expected win probability, and real win probability.
-
-0 discards the engine label completely, and 1 discards the real game result completely.
-"""
 
 
 def convert_str_to_ndarray(x: str):
@@ -224,7 +231,7 @@ class NNUE(nn.Module):
                         [
                             [
                                 [m * pc_val * np.double(100.0) for _ in range(64)]
-                                for pc_val in (5, 3, 3, 20, 9, 1)
+                                for pc_val in (5, 3, 3, 0, 9, 1)
                             ]
                             for m in sign
                         ]
@@ -266,10 +273,6 @@ device = (
 ## neural net training
 ################################
 ################################
-
-LEARN_RATE = 1e-3
-BATCH_SIZE = 64
-EPOCHS = 15
 
 
 def get_x_y_from_batch(batch):

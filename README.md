@@ -5,8 +5,7 @@ A chess engine.
 Features:
 - Negamax search
 - Alpha-beta pruning
-- Piece-square tables
-    - Tapered midgame-endgame evaluation
+- NNUE (neural network) based evaluation
 - UCI compatibility
 - Iterative deepening
     - Time management
