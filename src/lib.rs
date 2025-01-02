@@ -86,7 +86,7 @@ impl Piece {
     pub const fn value(&self) -> crate::eval::EvalInt {
         use Piece::*;
         (match self {
-            Rook => 6,
+            Rook => 5,
             Bishop => 3,
             Knight => 3,
             King => 200,
