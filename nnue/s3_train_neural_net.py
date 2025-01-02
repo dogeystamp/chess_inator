@@ -66,7 +66,7 @@ parser.add_argument(
 ################################
 
 
-LAMBDA = 0.75
+LAMBDA = 0.99
 """
 Interpolation coefficient between expected win probability, and real win probability.
 
@@ -212,11 +212,38 @@ class NNUE(nn.Module):
         super().__init__()
         self.k: np.double | None = None
         self.arch = ARCHITECTURE
-        self.linear_relu_stack = nn.Sequential(
-            nn.Linear(INPUT_SIZE, HIDDEN_SIZE, dtype=torch.double),
-            nn.ReLU(),
-            nn.Linear(HIDDEN_SIZE, 1, dtype=torch.double),
-        )
+
+        with torch.no_grad():
+            # initialize model to a simple piece value evaluation
+            l1 = nn.Linear(INPUT_SIZE, HIDDEN_SIZE, dtype=torch.double)
+            l1_params = list(l1.parameters())
+
+            def pc_value(sign):
+                return torch.flatten(
+                    torch.tensor(
+                        [
+                            [
+                                [m * pc_val * np.double(100.0) for _ in range(64)]
+                                for pc_val in (5, 3, 3, 20, 9, 1)
+                            ]
+                            for m in sign
+                        ]
+                    )
+                )
+
+            l1_params[0].data[0] = pc_value((1., 0.))
+            l1_params[0].data[1] = pc_value((0., 1.))
+
+            out = nn.Linear(HIDDEN_SIZE, 1, dtype=torch.double)
+            out_params = list(out.parameters())
+            out_params[0].data = torch.tensor(
+                [[0.0001 for i in range(HIDDEN_SIZE)]], dtype=torch.double
+            )
+            out_params[0].data[0][0] = torch.tensor(1.0, dtype=torch.double)
+            out_params[0].data[0][1] = torch.tensor(-1.0, dtype=torch.double)
+            out_params[1].data = torch.tensor([0.0], dtype=torch.double)
+
+        self.linear_relu_stack = nn.Sequential(l1, nn.ReLU(), out)
 
     def forward(self, x):
         logit = self.linear_relu_stack(x)
