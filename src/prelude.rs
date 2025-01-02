@@ -16,7 +16,7 @@ Copyright © 2024 dogeystamp <dogeystamp@disroot.org>
 pub use crate::coordination::{
     GoMessage, MsgBestmove, MsgToEngine, MsgToMain, UCIMode, UCIModeMachine, UCIModeTransition,
 };
-pub use crate::eval::{eval_metrics, Eval, EvalInt, EvalMetrics, EvalSEE};
+pub use crate::eval::{Eval, EvalInt, EvalSEE};
 pub use crate::fen::{FromFen, ToFen};
 pub use crate::movegen::{FromUCIAlgebraic, GenAttackers, Move, MoveGen, ToUCIAlgebraic};
 pub use crate::search::{

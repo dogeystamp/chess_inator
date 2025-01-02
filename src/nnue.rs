@@ -59,7 +59,7 @@ const BIN_SIZE: usize = std::mem::size_of::<NNUEParameters>() + ARCHITECTURE.len
 /// All weights and biases of the neural network.
 #[derive(Debug)]
 struct NNUEParameters {
-    sanity_check: [f64; 1],
+    _sanity_check: [f64; 1],
     l1_w: [[f64; INP_TENSOR_SIZE]; L1_SIZE],
     l1_b: [f64; L1_SIZE],
     out_w: [[f64; L1_SIZE]; OUT_SIZE],
@@ -82,7 +82,7 @@ impl NNUEParameters {
         }
 
         NNUEParameters {
-            sanity_check: cursor.read_f64(),
+            _sanity_check: cursor.read_f64(),
             l1_w: cursor.read2d_f64(),
             l1_b: cursor.read_f64(),
             out_w: cursor.read2d_f64(),
@@ -133,26 +133,34 @@ impl Display for InputTensor {
 }
 
 /// Neural network.
-#[derive(Debug)]
-pub(crate) struct Nnue<'a> {
-    params: &'a NNUEParameters,
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Nnue {
     l1: [f64; L1_SIZE],
     out: [f64; OUT_SIZE],
 }
+
+impl PartialEq for Nnue {
+    /// Neural net shouldn't affect board equality, so set always equal
+    fn eq(&self, _other: &Self) -> bool {
+        true
+    }
+}
+
+impl Eq for Nnue {}
 
 pub(crate) fn relu(x: f64) -> f64 {
     x.max(0.)
 }
 
-impl Nnue<'_> {
+impl Nnue {
     /// Turn on/off a bit in the input tensor.
     pub fn bit_set(&mut self, i: usize, on: bool) {
         debug_assert!(i < INP_TENSOR_SIZE);
         for j in 0..L1_SIZE {
             if on {
-                self.l1[j] += self.params.l1_w[j][i];
+                self.l1[j] += WEIGHTS.l1_w[j][i];
             } else {
-                self.l1[j] -= self.params.l1_w[j][i];
+                self.l1[j] -= WEIGHTS.l1_w[j][i];
             }
         }
 
@@ -163,11 +171,19 @@ impl Nnue<'_> {
         }
 
         for k in 0..OUT_SIZE {
-            self.out[k] = self.params.out_b[k];
+            self.out[k] = WEIGHTS.out_b[k];
             for (j, z) in z_l1.iter().enumerate() {
-                self.out[k] += self.params.out_w[k][j] * z;
+                self.out[k] += WEIGHTS.out_w[k][j] * z;
             }
         }
+    }
+
+    pub fn add_piece(&mut self, pc: ColPiece, sq: Square) {
+        self.bit_set(InputTensor::idx(pc, sq), true);
+    }
+
+    pub fn del_piece(&mut self, pc: ColPiece, sq: Square) {
+        self.bit_set(InputTensor::idx(pc, sq), false);
     }
 
     /// Centipawn evaluation from neural net.
@@ -179,8 +195,13 @@ impl Nnue<'_> {
         Nnue {
             l1: WEIGHTS.l1_b,
             out: WEIGHTS.out_b,
-            params: &WEIGHTS,
         }
+    }
+}
+
+impl Default for Nnue {
+    fn default() -> Self {
+        Nnue::new()
     }
 }
 
@@ -210,8 +231,7 @@ mod tests {
         let epsilon = 1e-9;
 
         let got = nnue.out[0];
-        let expected = nnue.params.sanity_check[0];
-
+        let expected = WEIGHTS._sanity_check[0];
 
         assert!((got - expected).abs() < epsilon, "NNUE state:\n{:?}\n\ngot {}, expected {}", nnue, got, expected)
     }

@@ -117,10 +117,6 @@ pub struct SearchConfig {
     ///
     /// Positive means avoid draws, and try to win instead.
     ///
-    /// Depending on the game phase, an extra factor will be multiplied too; in the beginning of
-    /// the game the opponent is more likely to blunder later and lose their advantage, so we don't
-    /// go for draws. Later, the result is more certain, so reduce the contempt factor.
-    ///
     /// An alternative interpretation of this: the contempt factor is the negative of the value
     /// assigned to a draw.
     pub contempt: EvalInt,
@@ -225,11 +221,10 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Vec<M
     }
 
     let is_repetition_draw = board.is_repetition();
-    let phase_factor = EvalInt::from(board.eval.min_maj_pieces / 5);
     // positive here since we're looking from the opposite perspective.
     // if white caused a draw, then we'd be black here.
     // therefore, white would see a negative value for the draw.
-    let contempt = state.config.contempt * phase_factor;
+    let contempt = state.config.contempt;
 
     // quiescence stand-pat score (only calculated if needed).
     // this is where static eval goes.
@@ -475,18 +470,15 @@ pub struct TimeLimits {
 impl TimeLimits {
     /// Make time limits based on wtime, btime (but color-independent).
     ///
-    /// Also takes in eval metrics, for instance to avoid wasting too much time in the opening.
-    pub fn from_ourtime_theirtime(ourtime_ms: u64, _theirtime_ms: u64, eval: EvalMetrics) -> Self {
+    /// Takes in a board object to change this based on game phase.
+    pub fn from_ourtime_theirtime(ourtime_ms: u64, _theirtime_ms: u64, board: &Board) -> Self {
         // hard timeout (max)
         let mut hard_ms = 100_000;
         // soft timeout (default max)
         let mut soft_ms = 1_500;
 
         // in some situations we can think longer
-        if eval.phase <= 13 {
-            // phase 13 is a single capture of a minor/major piece, so consider that out of the
-            // opening
-
+        if board.full_moves >= 15 {
             soft_ms = if ourtime_ms > 300_000 {
                 3_000
             } else if ourtime_ms > 600_000 {

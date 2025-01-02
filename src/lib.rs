@@ -32,7 +32,6 @@ pub mod prelude;
 use crate::fen::{FromFen, ToFen, START_POSITION};
 use crate::hash::Zobrist;
 use crate::movegen::GenAttackers;
-use eval::eval_score::EvalScores;
 
 pub const BOARD_WIDTH: usize = 8;
 pub const BOARD_HEIGHT: usize = 8;
@@ -624,8 +623,8 @@ pub struct Board {
     /// Whose turn it is
     turn: Color,
 
-    /// Counters for evaluation.
-    eval: EvalScores,
+    /// Neural network state.
+    nnue: nnue::Nnue,
 
     /// Hash state to incrementally update.
     zobrist: Zobrist,
@@ -638,6 +637,11 @@ pub struct Board {
 }
 
 impl Board {
+    pub fn static_eval(&self) -> eval::EvalInt {
+        use eval::Eval;
+        self.eval()
+    }
+
     /// Default chess position.
     pub fn starting_pos() -> Self {
         Board::from_fen(START_POSITION).unwrap()
@@ -675,7 +679,7 @@ impl Board {
         let pl = &mut self[pc.col];
         pl[pc.into()].on_sq(sq);
         *self.mail.sq_mut(sq) = Some(pc);
-        self.eval.add_piece(&pc, &sq);
+        self.nnue.add_piece(pc, sq);
         self.zobrist.toggle_pc(&pc, &sq);
         dest_pc
     }
@@ -694,7 +698,7 @@ impl Board {
             let pl = &mut self[pc.col];
             pl[pc.into()].off_sq(sq);
             *self.mail.sq_mut(sq) = None;
-            self.eval.del_piece(&pc, &sq);
+            self.nnue.del_piece(pc, sq);
             self.zobrist.toggle_pc(&pc, &sq);
             Some(pc)
         } else {
