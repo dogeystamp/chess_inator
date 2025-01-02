@@ -82,7 +82,7 @@ logging.basicConfig(level=getattr(logging, str.upper(args.log)))
 SKIP_PLIES: int = 20
 
 """Time limit in seconds for each position to be analyzed."""
-TIME_LIMIT: float = 0.7
+TIME_LIMIT: float = 0.45
 
 
 output_queue: Queue[tuple[str, str, int, Literal[-1, 0, 1]]] = Queue()

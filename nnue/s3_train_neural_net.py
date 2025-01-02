@@ -66,7 +66,7 @@ parser.add_argument(
 ################################
 
 
-LAMBDA = 0.99
+LAMBDA = 0.97
 """
 Interpolation coefficient between expected win probability, and real win probability.
 
@@ -269,7 +269,7 @@ device = (
 
 LEARN_RATE = 1e-3
 BATCH_SIZE = 64
-EPOCHS = 200
+EPOCHS = 15
 
 
 def get_x_y_from_batch(batch):
