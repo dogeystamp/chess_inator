@@ -197,7 +197,7 @@ struct MinmaxState {
 /// The best line (in reverse move order), and its corresponding absolute eval for the current player.
 fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Vec<Move>, SearchEval) {
     // these operations are relatively expensive, so only run them occasionally
-    if state.node_count % (1 << 16) == 0 {
+    if state.node_count % (1 << 12) == 0 {
         // respect the hard stop if given
         match state.rx_engine.try_recv() {
             Ok(msg) => match msg {
