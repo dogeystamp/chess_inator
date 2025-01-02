@@ -40,8 +40,11 @@ use crate::prelude::*;
 use crate::serialization::ConstCursor;
 use std::fmt::Display;
 
+// alias to easily change precision
+type Float = f32;
+
 /// Network architecture string. Reject any weights file that does not fulfill this.
-const ARCHITECTURE: &[u8] = "A01_768_3_1\x1b".as_bytes();
+const ARCHITECTURE: &[u8] = "A01_768_3_1_q<f4\x1b".as_bytes();
 
 /// Size of the input feature tensor.
 pub const INP_TENSOR_SIZE: usize = N_COLORS * N_PIECES * N_SQUARES;
@@ -59,14 +62,17 @@ const BIN_SIZE: usize = std::mem::size_of::<NNUEParameters>() + ARCHITECTURE.len
 /// All weights and biases of the neural network.
 #[derive(Debug)]
 struct NNUEParameters {
-    _sanity_check: [f64; 1],
-    l1_w: [[f64; INP_TENSOR_SIZE]; L1_SIZE],
-    l1_b: [f64; L1_SIZE],
-    out_w: [[f64; L1_SIZE]; OUT_SIZE],
-    out_b: [f64; OUT_SIZE],
+    _sanity_check: [Float; 1],
+    l1_w: [[Float; INP_TENSOR_SIZE]; L1_SIZE],
+    l1_b: [Float; L1_SIZE],
+    out_w: [[Float; L1_SIZE]; OUT_SIZE],
+    out_b: [Float; OUT_SIZE],
 }
 
 /// Parameters, in packed binary form.
+///
+/// This line may have a mismatched type error if the weights are incompatible, either because of
+/// their format, or the version string being different.
 const WEIGHTS_BIN: &[u8; BIN_SIZE] = include_bytes!("weights.bin");
 
 impl NNUEParameters {
@@ -82,11 +88,11 @@ impl NNUEParameters {
         }
 
         NNUEParameters {
-            _sanity_check: cursor.read_f64(),
-            l1_w: cursor.read2d_f64(),
-            l1_b: cursor.read_f64(),
-            out_w: cursor.read2d_f64(),
-            out_b: cursor.read_f64(),
+            _sanity_check: cursor.read_f32(),
+            l1_w: cursor.read2d_f32(),
+            l1_b: cursor.read_f32(),
+            out_w: cursor.read2d_f32(),
+            out_b: cursor.read_f32(),
         }
     }
 }
@@ -135,8 +141,8 @@ impl Display for InputTensor {
 /// Neural network.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Nnue {
-    l1: [f64; L1_SIZE],
-    out: [f64; OUT_SIZE],
+    l1: [Float; L1_SIZE],
+    out: [Float; OUT_SIZE],
 }
 
 impl PartialEq for Nnue {
@@ -148,7 +154,7 @@ impl PartialEq for Nnue {
 
 impl Eq for Nnue {}
 
-pub(crate) fn relu(x: f64) -> f64 {
+pub(crate) fn relu(x: Float) -> Float {
     x.max(0.)
 }
 
@@ -165,7 +171,7 @@ impl Nnue {
         }
 
         // activations
-        let mut z_l1: [f64; L1_SIZE] = [0.; L1_SIZE];
+        let mut z_l1: [Float; L1_SIZE] = [0.; L1_SIZE];
         for (j, z) in z_l1.iter_mut().enumerate() {
             *z = relu(self.l1[j])
         }
@@ -228,11 +234,11 @@ mod tests {
             nnue.bit_set(i, true);
         }
 
-        let epsilon = 1e-9;
+        let epsilon = 1.;
 
         let got = nnue.out[0];
         let expected = WEIGHTS._sanity_check[0];
 
-        assert!((got - expected).abs() < epsilon, "NNUE state:\n{:?}\n\ngot {}, expected {}", nnue, got, expected)
+        assert!((got - expected).abs() < epsilon, "NNUE state:\n{:?}\n\ngot {:?}, expected {:?}", nnue, got, expected)
     }
 }

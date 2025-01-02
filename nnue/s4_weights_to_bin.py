@@ -12,6 +12,8 @@
 """
 Convert PyTorch `.pth` weights to `.bin` weights.
 
+This step will also quantize all parameters from double to single precision float.
+
 The `.bin` file format contains the following fields:
 
 - Architecture name (model's shape identifier / version)
@@ -74,10 +76,14 @@ parser.add_argument(
 ################################
 
 
+# quantize to single precision float (little endian)
+dtype = "<f4"
+
 def params_bytes(obj) -> bytes:
     """Convert objects into bytes."""
 
-    return np.ascontiguousarray(obj, dtype="<f8").tobytes()
+    global dtype
+    return np.ascontiguousarray(obj, dtype=dtype).tobytes()
 
 
 if __name__ == "__main__":
@@ -86,6 +92,10 @@ if __name__ == "__main__":
     with torch.no_grad():
         model = s3nn.NNUE()
         s3nn.load_model(args.pth, model, None)
+
+        arch: str = model.arch
+
+        arch += "_q" + dtype
 
         bin = args.output or args.pth.with_suffix(".bin")
 
@@ -97,7 +107,7 @@ if __name__ == "__main__":
             (
                 model.linear_relu_stack(torch.ones([s3nn.INPUT_SIZE], dtype=torch.double))
             ).item()
-        ).astype("<f8", casting="equiv")
+        ).astype(dtype, casting="same_kind")
 
         print(f"sanity check value: {all_ones_res}")
         print(
@@ -108,7 +118,6 @@ if __name__ == "__main__":
         )
 
         with open(bin, "wb") as f:
-            arch: str = model.arch
             f.write(arch.encode())
             f.write(b"\x1b")
             f.write(all_ones_res)

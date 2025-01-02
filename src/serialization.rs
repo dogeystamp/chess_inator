@@ -75,13 +75,13 @@ impl<'a, const BUF_SIZE: usize> ConstCursor<'a, BUF_SIZE> {
             panic!("Could not fill buffer; ran out of bytes to read.");
         }
 
-        return out_buf
+        out_buf
     }
 
-    read_type!(f64, read_f64, read2d_f64);
+    read_type!(f32, read_f32, read2d_f32);
 
     pub const fn from_bytes(buf: &'a[u8; BUF_SIZE]) -> Self {
-        return Self {
+        Self {
             buf,
             loc: 0,
         }
