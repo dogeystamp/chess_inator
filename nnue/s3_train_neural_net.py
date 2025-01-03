@@ -204,14 +204,24 @@ def tune_sigmoid(cp, wdl) -> np.double:
 ################################
 ################################
 
-ARCHITECTURE = "A01_768_3_1"
+ARCHITECTURE = "A03_CReLU_768_16_1"
 """Unique ID / version for this architecture."""
 
 INPUT_SIZE = 2 * 6 * 64  # 768
 """Board feature input size."""
 
-HIDDEN_SIZE = 3
+HIDDEN_SIZE = 16
 """Hidden layer size."""
+
+
+class CReLU(nn.Module):
+    """Clamped ReLU."""
+
+    def __init__(self):
+        super(CReLU, self).__init__()
+
+    def forward(self, x):
+        return torch.clamp(x, 0, 1)
 
 
 class NNUE(nn.Module):
@@ -223,34 +233,47 @@ class NNUE(nn.Module):
         with torch.no_grad():
             # initialize model to a simple piece value evaluation
             l1 = nn.Linear(INPUT_SIZE, HIDDEN_SIZE, dtype=torch.double)
-            l1_params = list(l1.parameters())
+            out = nn.Linear(HIDDEN_SIZE, 1, dtype=torch.double)
 
-            def pc_value(sign):
+            l1_params = list(l1.parameters())
+            out_params = list(out.parameters())
+
+            def pc_value(sign, pc_idx):
                 return torch.flatten(
                     torch.tensor(
                         [
                             [
-                                [m * pc_val * np.double(100.0) for _ in range(64)]
-                                for pc_val in (5, 3, 3, 0, 9, 1)
+                                [m * pc_val / np.double(10) for _ in range(64)]
+                                if i == pc_idx
+                                else [0.0001 for _ in range(64)]
+                                for i, pc_val in enumerate((5, 3, 3, 0.001, 9, 1))
                             ]
                             for m in sign
-                        ]
+                        ],
+                        dtype=torch.double,
                     )
                 )
 
-            l1_params[0].data[0] = pc_value((1., 0.))
-            l1_params[0].data[1] = pc_value((0., 1.))
-
-            out = nn.Linear(HIDDEN_SIZE, 1, dtype=torch.double)
-            out_params = list(out.parameters())
+            # by default have blank slate in output layer
             out_params[0].data = torch.tensor(
                 [[0.0001 for i in range(HIDDEN_SIZE)]], dtype=torch.double
             )
-            out_params[0].data[0][0] = torch.tensor(1.0, dtype=torch.double)
-            out_params[0].data[0][1] = torch.tensor(-1.0, dtype=torch.double)
-            out_params[1].data = torch.tensor([0.0], dtype=torch.double)
+            out_params[1].data = torch.tensor([0.0001], dtype=torch.double)
 
-        self.linear_relu_stack = nn.Sequential(l1, nn.ReLU(), out)
+            # white pieces
+            for i in range(6):
+                l1_params[0].data[i] = pc_value((1.0, 0.0), i)
+                # scale to decipawns in output weight
+                out_params[0].data[0][i] = torch.tensor(1000, dtype=torch.double)
+            # black pieces
+            for i in range(6):
+                l1_params[0].data[i + 6] = pc_value((0.0, 1.0), i)
+                out_params[0].data[0][i + 6] = torch.tensor(-1000, dtype=torch.double)
+            # bias
+            for i in range(12):
+                l1_params[1].data[i] = torch.tensor(0.001)
+
+        self.linear_relu_stack = nn.Sequential(l1, CReLU(), out)
 
     def forward(self, x):
         logit = self.linear_relu_stack(x)

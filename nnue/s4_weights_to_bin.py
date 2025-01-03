@@ -32,12 +32,9 @@ All data is stored little-endian.
 As of writing, all data should be 64-bit floating point data (8 bytes per parameter).
 """
 
-from typing import Iterator
 import numpy as np
 import logging
 import argparse
-import functools
-import operator
 
 import torch
 import s3_train_neural_net as s3nn
@@ -76,8 +73,17 @@ parser.add_argument(
 ################################
 
 
-# quantize to single precision float (little endian)
-dtype = "<f4"
+# quantization type
+# `<` means little endian
+# `ix` means int with x bytes
+# `fx` means float with x bytes
+# e.g. "<f2" is a half precision floating point
+dtype = "<i2"
+
+# quantization scaling factors
+SCALE_L1 = 255
+SCALE_OUT = 64
+
 
 def params_bytes(obj) -> bytes:
     """Convert objects into bytes."""
@@ -105,13 +111,18 @@ if __name__ == "__main__":
 
         all_ones_res = np.double(
             (
-                model.linear_relu_stack(torch.ones([s3nn.INPUT_SIZE], dtype=torch.double))
+                model.linear_relu_stack(
+                    torch.ones([s3nn.INPUT_SIZE], dtype=torch.double)
+                )
             ).item()
-        ).astype(dtype, casting="same_kind")
+        ).astype(dtype, casting="unsafe")
 
         print(f"sanity check value: {all_ones_res}")
         print(
             "running the model with an all ones input should give you the above logit value (i.e. before the sigmoid)."
+        )
+        print(
+            "the logit value is for double precision float. results may vary when quantized."
         )
         print(
             "please be careful of endianness; this .bin file stores in little-endian."
@@ -121,5 +132,8 @@ if __name__ == "__main__":
             f.write(arch.encode())
             f.write(b"\x1b")
             f.write(all_ones_res)
-            for param in model.parameters():
+            params = list(model.parameters())
+            params[0].data *= SCALE_L1
+            params[1].data *= SCALE_OUT
+            for param in params:
                 f.write(params_bytes(param))

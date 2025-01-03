@@ -40,18 +40,23 @@ use crate::prelude::*;
 use crate::serialization::ConstCursor;
 use std::fmt::Display;
 
-// alias to easily change precision
-pub(crate) type Float = f32;
+// alias to easily change precision / data type
+pub(crate) type Param = i16;
 
 /// Network architecture string. Reject any weights file that does not fulfill this.
-const ARCHITECTURE: &[u8] = "A01_768_3_1_q<f4\x1b".as_bytes();
+const ARCHITECTURE: &[u8] = "A03_CReLU_768_16_1_q<i2\x1b".as_bytes();
 
 /// Size of the input feature tensor.
 pub const INP_TENSOR_SIZE: usize = N_COLORS * N_PIECES * N_SQUARES;
 /// Size of the hidden layer.
-const L1_SIZE: usize = 3;
+const L1_SIZE: usize = 16;
 /// Size of the output layer.
 const OUT_SIZE: usize = 1;
+
+/// Quantization scaling factor (params already scaled; we need to dequantize here)
+const L1_SCALE: Param = 255;
+/// Quantization scaling factor (params already scaled; we need to dequantize here)
+const OUT_SCALE: Param = 64;
 
 /// Expected size of the weights binary.
 ///
@@ -62,11 +67,11 @@ const BIN_SIZE: usize = std::mem::size_of::<NNUEParameters>() + ARCHITECTURE.len
 /// All weights and biases of the neural network.
 #[derive(Debug)]
 struct NNUEParameters {
-    _sanity_check: [Float; 1],
-    l1_w: [[Float; INP_TENSOR_SIZE]; L1_SIZE],
-    l1_b: [Float; L1_SIZE],
-    out_w: [[Float; L1_SIZE]; OUT_SIZE],
-    out_b: [Float; OUT_SIZE],
+    _sanity_check: [Param; 1],
+    l1_w: [[Param; INP_TENSOR_SIZE]; L1_SIZE],
+    l1_b: [Param; L1_SIZE],
+    out_w: [[Param; L1_SIZE]; OUT_SIZE],
+    out_b: [Param; OUT_SIZE],
 }
 
 /// Parameters, in packed binary form.
@@ -88,11 +93,11 @@ impl NNUEParameters {
         }
 
         NNUEParameters {
-            _sanity_check: cursor.read_float(),
-            l1_w: cursor.read2d_float(),
-            l1_b: cursor.read_float(),
-            out_w: cursor.read2d_float(),
-            out_b: cursor.read_float(),
+            _sanity_check: cursor.read(),
+            l1_w: cursor.read2d(),
+            l1_b: cursor.read(),
+            out_w: cursor.read2d(),
+            out_b: cursor.read(),
         }
     }
 }
@@ -142,7 +147,7 @@ impl Display for InputTensor {
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Nnue {
     /// Accumulator. This is the only persistent data; everything else is conceptual.
-    l1: [Float; L1_SIZE],
+    l1: [Param; L1_SIZE],
 }
 
 impl PartialEq for Nnue {
@@ -154,8 +159,8 @@ impl PartialEq for Nnue {
 
 impl Eq for Nnue {}
 
-pub(crate) fn relu(x: Float) -> Float {
-    x.max(0.)
+pub(crate) fn crelu(x: Param) -> Param {
+    x.clamp(0, L1_SCALE)
 }
 
 impl Nnue {
@@ -179,29 +184,27 @@ impl Nnue {
         self.bit_set(InputTensor::idx(pc, sq), false);
     }
 
-    /// Raw logits from neural net.
-    pub fn output_raw(&self) -> Float {
+    /// Logits from neural net, which should correspond to centipawns.
+    pub fn output(&self) -> EvalInt {
         // activations
-        let mut z_l1: [Float; L1_SIZE] = [0.; L1_SIZE];
+        let mut z_l1: [Param; L1_SIZE] = [0; L1_SIZE];
         for (j, z) in z_l1.iter_mut().enumerate() {
-            *z = relu(self.l1[j])
+            *z = crelu(self.l1[j])
         }
 
-        let mut out: [Float; OUT_SIZE] = [0.; OUT_SIZE];
+        let mut out: [EvalInt; OUT_SIZE] = [0; OUT_SIZE];
 
         for (k, out_node) in out.iter_mut().enumerate() {
-            *out_node = WEIGHTS.out_b[k];
+            *out_node = EvalInt::from(WEIGHTS.out_b[k]);
             for (j, z) in z_l1.iter().enumerate() {
-                *out_node += WEIGHTS.out_w[k][j] * z;
+                *out_node += EvalInt::from(WEIGHTS.out_w[k][j] * z);
             }
         }
 
-        out[0]
-    }
+        // dequantization step
+        out[0] /= EvalInt::from(L1_SCALE * OUT_SCALE);
 
-    /// Centipawn evaluation from neural net.
-    pub fn output(&self) -> EvalInt {
-        self.output_raw() as EvalInt
+        out[0]
     }
 
     pub fn new() -> Self {
@@ -240,7 +243,7 @@ mod tests {
             nnue.bit_set(i, true);
         }
 
-        let epsilon = 1.;
+        let epsilon = 1;
 
         let got = nnue.output_raw();
         let expected = WEIGHTS._sanity_check[0];
