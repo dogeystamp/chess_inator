@@ -10,7 +10,7 @@
 # Copyright © 2024 dogeystamp <dogeystamp@disroot.org>
 
 """
-Processes PGN game data into a tsv format suitable for training.
+Processes PGN game data into a tsv format suitable for training, shortly analyzing each position.
 
 Output columns:
 - FEN (for reference)
@@ -21,6 +21,9 @@ Output columns:
 This script depends on the `chess` package.
 Install it, or run this script using `pipx run process_pgn_data.py`.
 The script also depends on the chess_inator engine for analysis and filtering.
+
+Note that analysis is mostly considering whether the position is quiet or not,
+due to tactics.
 """
 
 # /// script
@@ -71,6 +74,12 @@ parser.add_argument(
     action="store_true",
     help="Keep output files that have not been fully written. These files may confuse this script when resuming operations.",
 )
+parser.add_argument(
+    "--time-limit",
+    type=float,
+    help="Duration limit in seconds for each ply to be analyzed.",
+    default=0.2
+)
 parser.add_argument("files", nargs="+", type=Path)
 args = parser.parse_args()
 
@@ -80,9 +89,6 @@ logging.basicConfig(level=getattr(logging, str.upper(args.log)))
 
 """Skip these many plies from the start (avoid training on opening)."""
 SKIP_PLIES: int = 20
-
-"""Time limit in seconds for each position to be analyzed."""
-TIME_LIMIT: float = 1
 
 
 output_queue: Queue[tuple[str, str, int, Literal[-1, 0, 1]]] = Queue()
@@ -147,7 +153,7 @@ async def worker(game_generator: AsyncIterator[pgn.Game]) -> None:
                 continue
             result = await engine.play(
                 board,
-                chess.engine.Limit(time=TIME_LIMIT),
+                chess.engine.Limit(time=args.time_limit),
                 info=chess.engine.INFO_ALL,
                 game=game,
             )
