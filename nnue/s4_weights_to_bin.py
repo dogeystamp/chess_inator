@@ -78,7 +78,7 @@ parser.add_argument(
 # `ix` means int with x bytes
 # `fx` means float with x bytes
 # e.g. "<f2" is a half precision floating point
-dtype = "<i2"
+dtype = "<i4"
 
 # quantization scaling factors
 SCALE_L1 = 255
@@ -134,6 +134,8 @@ if __name__ == "__main__":
             f.write(all_ones_res)
             params = list(model.parameters())
             params[0].data *= SCALE_L1
-            params[1].data *= SCALE_OUT
+            params[1].data *= SCALE_L1
+            params[2].data *= SCALE_OUT
+            params[3].data *= SCALE_OUT
             for param in params:
                 f.write(params_bytes(param))

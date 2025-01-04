@@ -637,11 +637,6 @@ pub struct Board {
 }
 
 impl Board {
-    pub fn static_eval(&self) -> eval::EvalInt {
-        use eval::Eval;
-        self.eval()
-    }
-
     /// Default chess position.
     pub fn starting_pos() -> Self {
         Board::from_fen(START_POSITION).unwrap()

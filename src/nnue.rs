@@ -41,10 +41,10 @@ use crate::serialization::ConstCursor;
 use std::fmt::Display;
 
 // alias to easily change precision / data type
-pub(crate) type Param = i16;
+pub(crate) type Param = i32;
 
 /// Network architecture string. Reject any weights file that does not fulfill this.
-const ARCHITECTURE: &[u8] = "A03_CReLU_768_16_1_q<i2\x1b".as_bytes();
+const ARCHITECTURE: &[u8] = "A03_CReLU_768_16_1_q<i4\x1b".as_bytes();
 
 /// Size of the input feature tensor.
 pub const INP_TENSOR_SIZE: usize = N_COLORS * N_PIECES * N_SQUARES;
@@ -197,7 +197,7 @@ impl Nnue {
         for (k, out_node) in out.iter_mut().enumerate() {
             *out_node = EvalInt::from(WEIGHTS.out_b[k]);
             for (j, z) in z_l1.iter().enumerate() {
-                *out_node += EvalInt::from(WEIGHTS.out_w[k][j] * z);
+                *out_node += EvalInt::from(WEIGHTS.out_w[k][j]) * EvalInt::from(*z);
             }
         }
 
@@ -245,7 +245,7 @@ mod tests {
 
         let epsilon = 1;
 
-        let got = nnue.output_raw();
+        let got = nnue.output();
         let expected = WEIGHTS._sanity_check[0];
 
         assert!((got - expected).abs() < epsilon, "NNUE state:\n{:?}\n\ngot {:?}, expected {:?}", nnue, got, expected)

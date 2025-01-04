@@ -171,7 +171,7 @@ fn cmd_go(mut tokens: std::str::SplitWhitespace<'_>, state: &mut MainState) {
 /// information.
 fn cmd_eval(mut _tokens: std::str::SplitWhitespace<'_>, state: &mut MainState) {
     println!("STATIC EVAL");
-    println!("{}", state.board.static_eval());
+    println!("{}", state.board.eval());
 }
 
 fn match_true_false(s: &str) -> Option<bool> {
