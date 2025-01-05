@@ -590,6 +590,7 @@ pub fn is_quiescent_position(board: &Board, eval: SearchEval) -> bool {
 }
 
 #[cfg(test)]
+#[cfg(not(debug_assertions))]
 mod tests {
     use super::*;
 

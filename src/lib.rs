@@ -23,9 +23,9 @@ pub mod fen;
 mod hash;
 pub mod movegen;
 pub mod nnue;
-mod serialization;
 pub mod random;
 pub mod search;
+mod serialization;
 
 pub mod prelude;
 
@@ -173,11 +173,7 @@ impl TryFrom<SquareIdx> for Square {
     type Error = SquareError;
 
     fn try_from(value: SquareIdx) -> Result<Self, Self::Error> {
-        if (0..N_SQUARES).contains(&value.into()) {
-            Ok(Square(value))
-        } else {
-            Err(SquareError::OutOfBounds)
-        }
+        Self::const_try_from(value)
     }
 }
 
@@ -218,35 +214,51 @@ impl From<Square> for usize {
 
 macro_rules! from_row_col_generic {
     ($T: ty, $r: ident, $c: ident) => {
-        if !(0..(BOARD_HEIGHT as $T)).contains(&$r) || !(0..(BOARD_WIDTH as $T)).contains(&$c) {
+        #[allow(unused_comparisons)]
+        if !(0 <= $r && $r < (BOARD_HEIGHT as $T)) || !(0 <= $c && $c < (BOARD_WIDTH as $T)) {
             Err(SquareError::OutOfBounds)
         } else {
             let ret = (BOARD_WIDTH as $T) * $r + $c;
-            ret.try_into()
+            debug_assert!(ret <= SquareIdx::MAX as $T);
+            Square::const_try_from(ret as u8)
         }
     };
 }
 
 impl Square {
-    pub fn from_row_col(r: usize, c: usize) -> Result<Self, SquareError> {
+    pub const fn const_try_from(value: SquareIdx) -> Result<Self, SquareError> {
+        const LIMIT: SquareIdx = N_SQUARES as SquareIdx;
+        #[allow(unused_comparisons, clippy::absurd_extreme_comparisons)]
+        if 0 <= value && value < LIMIT {
+            Ok(Square(value))
+        } else {
+            Err(SquareError::OutOfBounds)
+        }
+    }
+
+    pub const fn from_row_col(r: usize, c: usize) -> Result<Self, SquareError> {
         //! Get index of square based on row and column.
         from_row_col_generic!(usize, r, c)
     }
-    pub fn from_row_col_signed(r: isize, c: isize) -> Result<Self, SquareError> {
+    pub const fn from_row_col_signed(r: isize, c: isize) -> Result<Self, SquareError> {
         from_row_col_generic!(isize, r, c)
     }
-    pub fn to_row_col(self) -> (usize, usize) {
+    pub const fn to_row_col(self) -> (usize, usize) {
         //! Get row, column from index
-        let div = usize::from(self.0) / BOARD_WIDTH;
-        let rem = usize::from(self.0) % BOARD_WIDTH;
+        let div = self.0 / (BOARD_WIDTH as SquareIdx);
+        let rem = self.0 % (BOARD_WIDTH as SquareIdx);
         debug_assert!(div <= 7);
         debug_assert!(rem <= 7);
-        (div, rem)
+        // as long as this is true, there probably won't be overflows
+        debug_assert!(SquareIdx::MAX as u128 <= usize::MAX as u128);
+        (div as usize, rem as usize)
     }
-    pub fn to_row_col_signed(self) -> (isize, isize) {
+    pub const fn to_row_col_signed(self) -> (isize, isize) {
         //! Get row, column (signed) from index
         let (r, c) = self.to_row_col();
-        (r.try_into().unwrap(), c.try_into().unwrap())
+        // as long as this is true, there probably won't be overflows
+        debug_assert!(SquareIdx::MAX as i128 <= isize::MAX as i128);
+        (r as isize, c as isize)
     }
 
     /// Vertically mirror a square.
@@ -258,7 +270,7 @@ impl Square {
     }
 
     /// Manhattan (grid-based) distance with another Square.
-    pub fn manhattan(&self, other: Self) -> usize {
+    pub const fn manhattan(&self, other: Self) -> usize {
         let (r1, c1) = self.to_row_col();
         let (r2, c2) = other.to_row_col();
         r1.abs_diff(r2) + c1.abs_diff(c2)
@@ -831,6 +843,12 @@ mod tests {
 
     use fen::FromFen;
     use movegen::{FromUCIAlgebraic, Move, ToUCIAlgebraic};
+
+    #[test]
+    /// Ensure that the const `as` conversion for `N_SQUARES` doesn't overflow.
+    fn square_limit() {
+        assert!(u8::try_from(N_SQUARES).unwrap() == (N_SQUARES as u8));
+    }
 
     #[test]
     fn test_square_casts() {

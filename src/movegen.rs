@@ -523,7 +523,8 @@ impl GenAttackers for Board {
             true
         }
 
-        macro_rules! detect_checker {
+        /// Check each square one-by-one for an attacker piece.
+        macro_rules! detect_attacker {
             ($dirs: ident, $pc: pat, $color: pat, $keep_going: expr) => {
                 for dir in $dirs.into_iter() {
                     let (mut r, mut c) = dest.to_row_col_signed();
@@ -564,18 +565,18 @@ impl GenAttackers for Board {
             };
         }
 
-        detect_checker!(DIRS_DIAG, Bishop | Queen, both!(), true);
-        detect_checker!(DIRS_STRAIGHT, Rook | Queen, both!(), true);
+        detect_attacker!(DIRS_DIAG, Bishop | Queen, both!(), true);
+        detect_attacker!(DIRS_STRAIGHT, Rook | Queen, both!(), true);
         // this shouldn't happen in legal chess but we're using this function in a pseudo-legal
         // move gen context
-        detect_checker!(DIRS_STAR, King, both!(), false);
-        detect_checker!(DIRS_KNIGHT, Knight, both!(), false);
+        detect_attacker!(DIRS_STAR, King, both!(), false);
+        detect_attacker!(DIRS_KNIGHT, Knight, both!(), false);
 
         if filter_color.is_none_or(|c| matches!(c, Color::Black)) {
-            detect_checker!(dirs_black_pawn, Pawn, Color::Black, false);
+            detect_attacker!(dirs_black_pawn, Pawn, Color::Black, false);
         }
         if filter_color.is_none_or(|c| matches!(c, Color::White)) {
-            detect_checker!(dirs_white_pawn, Pawn, Color::White, false);
+            detect_attacker!(dirs_white_pawn, Pawn, Color::White, false);
         }
 
         ret
