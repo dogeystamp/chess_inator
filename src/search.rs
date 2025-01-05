@@ -226,8 +226,6 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Vec<M
     // therefore, white would see a negative value for the draw.
     let contempt = state.config.contempt;
 
-    let is_in_check = board.is_check(board.turn);
-
     // quiescence stand-pat score (only calculated if needed).
     // this is where static eval goes.
     let mut board_eval: Option<EvalInt> = None;
@@ -267,7 +265,7 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Vec<M
         /// Only evaluate a single move.
         None,
     }
-    let mut move_generator = if mm.quiesce && !is_in_check {
+    let mut move_generator = if mm.quiesce {
         MoveGenerator::Quiescence
     } else {
         MoveGenerator::Normal
@@ -315,9 +313,8 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Vec<M
 
     let mut abs_best = SearchEval::Exact(EVAL_WORST);
 
-    if mm.quiesce && !is_in_check {
+    if mm.quiesce {
         // stand pat
-        // (but if side is in check, can't just do nothing)
         abs_best = SearchEval::Exact(board_eval.unwrap());
     }
 
@@ -335,10 +332,11 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Vec<M
     }
 
     if mvs.is_empty() {
-        if mm.quiesce && !is_in_check {
+        if mm.quiesce {
             // use stand pat
             return (Vec::new(), SearchEval::Exact(board_eval.unwrap()));
         }
+        let is_in_check = board.is_check(board.turn);
 
         if is_in_check {
             return (Vec::new(), SearchEval::Checkmate(-1));
