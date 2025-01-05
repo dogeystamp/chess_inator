@@ -19,6 +19,7 @@ use crate::{
     Board, CastleRights, ColPiece, Color, Piece, Square, SquareError, BOARD_HEIGHT, BOARD_WIDTH,
     N_SQUARES,
 };
+use std::ops::Not;
 
 /// Piece enum specifically for promotions.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -98,9 +99,21 @@ pub struct AntiMove {
 impl AntiMove {
     /// Undo the move.
     pub fn unmake(self, pos: &mut Board) {
-        Zobrist::toggle_board_info(pos);
+        self.unmake_general(pos, true)
+    }
 
-        pos.move_piece(self.dest, self.src);
+    /// Undo a `make_no_update` move.
+    pub(crate) fn unmake_no_update(self, pos: &mut Board) {
+        self.unmake_general(pos, false)
+    }
+
+    /// Undo the move (internal API).
+    fn unmake_general(self, pos: &mut Board, update_metrics: bool) {
+        if update_metrics {
+            Zobrist::toggle_board_info(pos);
+        }
+
+        pos.move_piece(self.dest, self.src, update_metrics);
         pos.half_moves = self.half_moves;
         pos.castle = self.castle;
         pos.ep_square = self.ep_square;
@@ -115,6 +128,7 @@ impl AntiMove {
                             pc: cap_pc,
                             col: pos.turn.flip(),
                         },
+                        update_metrics,
                     );
                 }
             };
@@ -140,17 +154,20 @@ impl AntiMove {
                         pc: Piece::Pawn,
                         col: pos.turn,
                     },
+                    update_metrics,
                 );
             }
             AntiMoveType::Castle {
                 rook_src,
                 rook_dest,
             } => {
-                pos.move_piece(rook_dest, rook_src);
+                pos.move_piece(rook_dest, rook_src, update_metrics);
             }
         }
 
-        Zobrist::toggle_board_info(pos);
+        if update_metrics {
+            Zobrist::toggle_board_info(pos);
+        }
     }
 }
 
@@ -174,6 +191,19 @@ pub struct Move {
 impl Move {
     /// Apply move to a position.
     pub fn make(self, pos: &mut Board) -> AntiMove {
+        self.make_general(pos, true)
+    }
+
+    /// Apply a move without incremental updates of evaluation state.
+    pub(crate) fn make_no_update(self, pos: &mut Board) -> AntiMove {
+        self.make_general(pos, false)
+    }
+
+    /// Apply move to a position.
+    ///
+    /// * `update_metrics`, if set false, will disable incremental updates of Zobrist hashes, and
+    ///   NNUE state.
+    fn make_general(self, pos: &mut Board, update_metrics: bool) -> AntiMove {
         let mut anti_move = AntiMove {
             dest: self.dest,
             src: self.src,
@@ -184,8 +214,10 @@ impl Move {
             ep_square: pos.ep_square,
         };
 
-        // undo hashes (we will update them at the end of this function)
-        Zobrist::toggle_board_info(pos);
+        if update_metrics {
+            // undo hashes (we will update them at the end of this function)
+            Zobrist::toggle_board_info(pos);
+        }
 
         // reset en passant
         let ep_square = pos.ep_square;
@@ -227,13 +259,14 @@ impl Move {
 
                 anti_move.move_type = AntiMoveType::Promotion;
 
-                pos.del_piece(self.src);
+                pos.del_piece(self.src, update_metrics);
                 let cap_pc = pos.set_piece(
                     self.dest,
                     ColPiece {
                         pc: Piece::from(to_piece),
                         col: pc_src.col,
                     },
+                    update_metrics,
                 );
                 anti_move.cap = cap_pc.map(|pc| pc.pc);
             }
@@ -278,7 +311,7 @@ impl Move {
                         .expect("En-passant capture square should be valid");
 
                         anti_move.move_type = AntiMoveType::EnPassant { cap: ep_capture };
-                        if let Some(pc_cap) = pos.del_piece(ep_capture) {
+                        if let Some(pc_cap) = pos.del_piece(ep_capture, update_metrics) {
                             debug_assert_eq!(
                                 pc_cap.col,
                                 pos.turn.flip(),
@@ -333,7 +366,7 @@ impl Move {
                             rook_src,
                             rook_dest,
                         };
-                        pos.move_piece(rook_src, rook_dest);
+                        pos.move_piece(rook_src, rook_dest, update_metrics);
                     }
                     debug_assert!(
                         (0..=2).contains(&horiz_diff),
@@ -362,14 +395,16 @@ impl Move {
                     }
                 }
 
-                pos.move_piece(self.src, self.dest);
+                pos.move_piece(self.src, self.dest, update_metrics);
             }
         };
 
         pos.turn = pos.turn.flip();
 
-        // redo hashes (we undid them at the start of this function)
-        Zobrist::toggle_board_info(pos);
+        if update_metrics {
+            // redo hashes (we undid them at the start of this function)
+            Zobrist::toggle_board_info(pos);
+        }
 
         anti_move
     }
@@ -454,6 +489,146 @@ impl ToUCIAlgebraic for Move {
     }
 }
 
+/// Lookup tables for move generation.
+mod lookup_tables {
+    use super::{DIRS_DIAG, DIRS_KNIGHT, DIRS_STAR, DIRS_STRAIGHT};
+    use crate::prelude::*;
+    use crate::{Bitboard, SquareIdx};
+
+    /// Trace a ray between two squares (excluding endpoints).
+    const fn iter_ray(
+        mut r1: isize,
+        mut c1: isize,
+        r2: isize,
+        c2: isize,
+        delta_r: isize,
+        delta_c: isize,
+    ) -> Bitboard {
+        let mut ret = Bitboard(0);
+        loop {
+            r1 += delta_r;
+            c1 += delta_c;
+            if r1 == r2 && c1 == c2 {
+                break;
+            }
+            if let Ok(sq) = Square::from_row_col_signed(r1, c1) {
+                ret.on_sq(sq)
+            } else {
+                panic!("Ray went out of bounds.")
+            }
+        }
+        ret
+    }
+
+    /// Generate table for rays between two squares.
+    const fn gen_rays() -> [[Bitboard; N_SQUARES]; N_SQUARES] {
+        let mut ret: [[Bitboard; N_SQUARES]; N_SQUARES] = [[Bitboard(0); N_SQUARES]; N_SQUARES];
+        let mut i = 0;
+        while i < N_SQUARES {
+            let (r1, c1) = Square(i as SquareIdx).to_row_col_signed();
+            let mut j = 0;
+            while j < N_SQUARES {
+                if i == j {
+                    j += 1;
+                    continue;
+                }
+                if i > j {
+                    ret[i][j] = ret[j][i];
+                }
+
+                let (r2, c2) = Square(j as SquareIdx).to_row_col_signed();
+
+                const fn sign(x: isize) -> isize {
+                    if x < 0 {
+                        -1
+                    } else if x == 0 {
+                        0
+                    } else {
+                        1
+                    }
+                }
+
+                if r1 == r2 || c1 == c2 || r1.abs_diff(r2) == c1.abs_diff(c2) {
+                    ret[i][j] = iter_ray(r1, c1, r2, c2, sign(r2 - r1), sign(c2 - c1));
+                } else {
+                    // two squares have no line (straight or diagonal) between them
+                }
+
+                j += 1;
+            }
+            i += 1;
+        }
+        ret
+    }
+
+    /// Generate knight move lookup table.
+    const fn gen_knight() -> [Bitboard; N_SQUARES] {
+        let mut ret: [Bitboard; N_SQUARES] = [Bitboard(0); N_SQUARES];
+        let mut i = 0;
+        while i < N_SQUARES {
+            let (r, c) = Square(i as SquareIdx).to_row_col_signed();
+            let mut j = 0;
+            while j < DIRS_KNIGHT.len() {
+                let delta = DIRS_KNIGHT[j];
+                let (nr, nc) = (r + delta.0, c + delta.1);
+                if let Ok(dest_sq) = Square::from_row_col_signed(nr, nc) {
+                    ret[i].on_sq(dest_sq);
+                }
+                j += 1;
+            }
+            i += 1;
+        }
+        ret
+    }
+
+    /// Generate slider piece (queen, bishop, rook, king) lookup table.
+    const fn gen_slider<const N: usize>(
+        dirs: [(isize, isize); N],
+        keep_going: bool,
+    ) -> [Bitboard; N_SQUARES] {
+        let mut ret: [Bitboard; N_SQUARES] = [Bitboard(0); N_SQUARES];
+        let mut i = 0;
+        while i < N_SQUARES {
+            let (r, c) = Square(i as SquareIdx).to_row_col_signed();
+            let mut j = 0;
+            while j < dirs.len() {
+                let delta = dirs[j];
+                let (mut nr, mut nc) = (r, c);
+                loop {
+                    (nr, nc) = (nr + delta.0, nc + delta.1);
+                    if let Ok(dest_sq) = Square::from_row_col_signed(nr, nc) {
+                        ret[i].on_sq(dest_sq);
+                    } else {
+                        break;
+                    }
+                    if !keep_going {
+                        break;
+                    }
+                }
+                j += 1;
+            }
+            i += 1;
+        }
+        ret
+    }
+
+    pub const RAYS: [[Bitboard; N_SQUARES]; N_SQUARES] = gen_rays();
+
+    pub const MOVE_TABLES: [[Bitboard; N_SQUARES]; N_PIECES - 1] = [
+        // rook
+        gen_slider(DIRS_STRAIGHT, true),
+        // bishop
+        gen_slider(DIRS_DIAG, true),
+        // knight
+        gen_knight(),
+        // king
+        gen_slider(DIRS_STAR, false),
+        // queen
+        gen_slider(DIRS_STAR, true),
+        // pawn is handled separately because it moves weird
+    ];
+}
+
 pub trait GenAttackers {
     /// Generate attackers/attacks for a given square.
     ///
@@ -524,7 +699,8 @@ impl GenAttackers for Board {
         }
 
         /// Check each square one-by-one for an attacker piece.
-        macro_rules! detect_attacker {
+        /// TODO: lump this into detect_attacker properly
+        macro_rules! find_pawns {
             ($dirs: ident, $pc: pat, $color: pat, $keep_going: expr) => {
                 for dir in $dirs.into_iter() {
                     let (mut r, mut c) = dest.to_row_col_signed();
@@ -553,30 +729,78 @@ impl GenAttackers for Board {
             };
         }
 
+        /// Find attackers with line of sight.
+        ///
+        /// Does not work with pawns.
+        fn detect_attacker(
+            board: &Board,
+            dest: Square,
+            pc: Piece,
+            ret: &mut Vec<(ColPiece, Move)>,
+            filter_color: Option<Color>,
+            use_line_of_sight: bool,
+            single: bool,
+        ) {
+            for col in [Color::White, Color::Black] {
+                if filter_color.is_none_or(|x| x == col) {
+                    let attackers =
+                        board[col][pc] & lookup_tables::MOVE_TABLES[pc as usize][usize::from(dest)];
+                    for src in attackers {
+                        if use_line_of_sight
+                            && (lookup_tables::RAYS[usize::from(src)][usize::from(dest)]
+                                & board.occupancy)
+                                .is_empty()
+                                .not()
+                        {
+                            // no line of sight; not an attacker
+                            continue;
+                        }
+                        ret.push((
+                            ColPiece { pc, col },
+                            Move {
+                                src,
+                                dest,
+                                move_type: MoveType::Normal,
+                            },
+                        ));
+                        if single {
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+
         // inverted because our perspective is from the attacked square
         let dirs_white_pawn = [(-1, 1), (-1, -1)];
         let dirs_black_pawn = [(1, 1), (1, -1)];
 
         use Piece::*;
 
-        macro_rules! both {
-            () => {
-                Color::White | Color::Black
-            };
+        macro_rules! detect {
+            ($pc: ident, $line_of_sight: expr) => {
+                detect_attacker(self, dest, $pc, &mut ret, filter_color, $line_of_sight, single);
+                if single && !ret.is_empty() {
+                    return ret;
+                }
+            }
         }
 
-        detect_attacker!(DIRS_DIAG, Bishop | Queen, both!(), true);
-        detect_attacker!(DIRS_STRAIGHT, Rook | Queen, both!(), true);
+        detect!(Knight, false);
+        detect!(Queen, true);
+        detect!(Bishop, true);
+        detect!(Rook, true);
+        detect!(King, false);
+
         // this shouldn't happen in legal chess but we're using this function in a pseudo-legal
         // move gen context
-        detect_attacker!(DIRS_STAR, King, both!(), false);
-        detect_attacker!(DIRS_KNIGHT, Knight, both!(), false);
+        detect!(King, false);
 
         if filter_color.is_none_or(|c| matches!(c, Color::Black)) {
-            detect_attacker!(dirs_black_pawn, Pawn, Color::Black, false);
+            find_pawns!(dirs_black_pawn, Pawn, Color::Black, false);
         }
         if filter_color.is_none_or(|c| matches!(c, Color::White)) {
-            detect_attacker!(dirs_white_pawn, Pawn, Color::White, false);
+            find_pawns!(dirs_white_pawn, Pawn, Color::White, false);
         }
 
         ret
@@ -754,9 +978,9 @@ fn is_legal(board: &mut Board, mv: Move) -> bool {
     }
 
     // disallow moving into check
-    let anti_move = mv.make(board);
+    let anti_move = mv.make_no_update(board);
     let is_check = board.is_check(board.turn.flip());
-    anti_move.unmake(board);
+    anti_move.unmake_no_update(board);
     if is_check {
         return false;
     }
@@ -846,7 +1070,7 @@ impl MoveGenInternal for Board {
                     .map(|nc| Square::from_row_col_signed(r, nc).unwrap())
                     .map(|dest| {
                         let mut board = *self;
-                        board.move_piece(src, dest);
+                        board.move_piece(src, dest, false);
                         board.is_check(self.turn)
                     })
                     .any(|x| x);
