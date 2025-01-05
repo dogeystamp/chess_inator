@@ -34,7 +34,7 @@ macro_rules! read_type {
             let mut out_buf: [$type; N] = [default; N];
             let mut i = 0;
             while i < N {
-                let elem_buf: [u8; SZ] = self.read_u8::<{SZ}>();
+                let elem_buf: [u8; SZ] = self.read_u8::<{ SZ }>();
                 out_buf[i] = <$type>::from_le_bytes(elem_buf);
                 i += 1;
             }
@@ -55,7 +55,7 @@ macro_rules! read_type {
             }
             out_buf
         }
-    }
+    };
 }
 
 impl<'a, const BUF_SIZE: usize> ConstCursor<'a, BUF_SIZE> {
@@ -80,11 +80,7 @@ impl<'a, const BUF_SIZE: usize> ConstCursor<'a, BUF_SIZE> {
 
     read_type!(crate::nnue::Param, read, read2d);
 
-    pub const fn from_bytes(buf: &'a[u8; BUF_SIZE]) -> Self {
-        Self {
-            buf,
-            loc: 0,
-        }
+    pub const fn from_bytes(buf: &'a [u8; BUF_SIZE]) -> Self {
+        Self { buf, loc: 0 }
     }
 }
-

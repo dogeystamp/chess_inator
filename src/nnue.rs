@@ -213,9 +213,7 @@ impl Nnue {
     }
 
     pub fn new() -> Self {
-        Nnue {
-            l1: WEIGHTS.l1_b,
-        }
+        Nnue { l1: WEIGHTS.l1_b }
     }
 }
 
@@ -251,6 +249,12 @@ mod tests {
         let got = nnue.output();
         let expected = EvalInt::from(WEIGHTS._sanity_check[0]);
 
-        assert!((got - expected).abs() < epsilon, "NNUE state:\n{:?}\n\ngot {:?}, expected {:?}", nnue, got, expected)
+        assert!(
+            (got - expected).abs() < epsilon,
+            "NNUE state:\n{:?}\n\ngot {:?}, expected {:?}",
+            nnue,
+            got,
+            expected
+        )
     }
 }
