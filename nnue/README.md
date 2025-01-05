@@ -11,6 +11,8 @@ Required packages:
 - torch
 - scipy
 - (optional) matplotlib
+- chess
+- tqdm
 
 This folder includes the following scripts:
 - `s1_batch_pgn_data.py`: Combine and convert big PGN files into small chunked files.

@@ -19,6 +19,7 @@ The `.bin` file format contains the following fields:
 - Architecture name (model's shape identifier / version)
 - A single ESC ('0x1b') character to end the architecture name
 - A test value that is the result of passing an all-ones input to the model.
+- A value representing the K sigmoid constant.
 - A single contiguous array of all weights/parameters.
 
 It is the engine code's responsibility to know exactly how many parameters there
@@ -78,7 +79,7 @@ parser.add_argument(
 # `ix` means int with x bytes
 # `fx` means float with x bytes
 # e.g. "<f2" is a half precision floating point
-dtype = "<i4"
+dtype = "<i2"
 
 # quantization scaling factors
 SCALE_L1 = 255
@@ -113,13 +114,14 @@ if __name__ == "__main__":
             (
                 model.linear_relu_stack(
                     torch.ones([s3nn.INPUT_SIZE], dtype=torch.double)
-                )
+                ) * model.k
             ).item()
         ).astype(dtype, casting="unsafe")
 
+        print(f"writing architecture {arch}")
         print(f"sanity check value: {all_ones_res}")
         print(
-            "running the model with an all ones input should give you the above logit value (i.e. before the sigmoid)."
+            "running the model with an all ones input should give you the above centipawn (logit) value."
         )
         print(
             "the logit value is for double precision float. results may vary when quantized."
@@ -128,10 +130,15 @@ if __name__ == "__main__":
             "please be careful of endianness; this .bin file stores in little-endian."
         )
 
+        k = np.ascontiguousarray(np.array(model.k), dtype=dtype)
+
+        print(f"\nk is {k}")
+
         with open(bin, "wb") as f:
             f.write(arch.encode())
             f.write(b"\x1b")
             f.write(all_ones_res)
+            f.write(k)
             params = list(model.parameters())
             params[0].data *= SCALE_L1
             params[1].data *= SCALE_L1

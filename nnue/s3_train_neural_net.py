@@ -22,15 +22,28 @@ from torch.utils.data import Dataset, DataLoader
 from torch import nn
 from pathlib import Path
 from scipy.optimize import curve_fit
+from tqdm import tqdm
 
 
 logging.basicConfig(level=logging.INFO)
+pd.options.mode.copy_on_write = True
+
+device = (
+    "cuda"
+    if torch.cuda.is_available()
+    else "mps"
+    if torch.backends.mps.is_available()
+    else "cpu"
+)
+
+NUM_WORKERS = 0
+"""Separate workers to use for loading training data."""
 
 ################################
 ## hyperparameters
 ################################
 
-LAMBDA = 0.97
+LAMBDA = 0.92
 """
 Interpolation coefficient between expected win probability, and real win probability.
 
@@ -38,8 +51,8 @@ Interpolation coefficient between expected win probability, and real win probabi
 """
 
 LEARN_RATE = 1e-3
-BATCH_SIZE = 64
-EPOCHS = 18
+BATCH_SIZE = 16384
+EPOCHS = 20
 
 
 ################################
@@ -81,18 +94,17 @@ parser.add_argument(
 ################################
 
 
-def convert_str_to_ndarray(x: str):
-    """Convert board feature string to numpy ndarray."""
-    arr = np.empty(INPUT_SIZE)
-    for i, c in enumerate(x):
-        match c:
-            case "1":
-                arr[i] = 1
-            case "0":
-                arr[i] = 0
-            case _:
-                raise ValueError(f"Invalid character in board features '{c}'.")
-    return arr
+class StrToTensor(nn.Module):
+    """Multi-hot bitstring to tensor conversion."""
+
+    def forward(self, x: str):
+        arr = np.frombuffer(bytearray(x, "utf-8"), np.int8) - ord("0")
+        arr.setflags(write=True)
+        return torch.from_numpy(arr).to(device=device)
+
+
+str_to_tensor = StrToTensor()
+# str_to_tensor = torch.compile(StrToTensor(), mode="default")
 
 
 class ChessPositionDataset(Dataset):
@@ -104,8 +116,9 @@ class ChessPositionDataset(Dataset):
         self.data["game_result"] = (self.data["game_result"] + 1) / 2
 
         # convert features to tensors
-        self.data["board_features"] = self.data["board_features"].apply(
-            convert_str_to_ndarray
+        tqdm.pandas(desc="STRING PARSING")
+        self.data["board_features"] = self.data["board_features"].progress_apply(
+            str_to_tensor
         )
 
         # tune sigmoid
@@ -120,7 +133,11 @@ class ChessPositionDataset(Dataset):
         return len(self.data)
 
     def __getitem__(self, idx):
-        return self.data.iloc[idx]
+        row = self.data.iloc[idx]
+        return (
+            row["board_features"],
+            torch.tensor(row["expected_result"], dtype=torch.double, device=device),
+        )
 
     def plot_sigmoid(self):
         """Display the curve that correlates centipawns to win-draw-loss."""
@@ -153,11 +170,6 @@ class ChessPositionDataset(Dataset):
         plt.ylabel("Win-Draw-Loss evaluation")
 
         plt.show()
-
-
-def collate_chess_positions(data):
-    """Combine multiple examples within a batch."""
-    return pd.concat(data)
 
 
 ################################
@@ -204,7 +216,7 @@ def tune_sigmoid(cp, wdl) -> np.double:
 ################################
 ################################
 
-ARCHITECTURE = "A03_CReLU_768_16_1"
+ARCHITECTURE = "A07_CReLU_768_16_1_K"
 """Unique ID / version for this architecture."""
 
 INPUT_SIZE = 2 * 6 * 64  # 768
@@ -232,8 +244,8 @@ class NNUE(nn.Module):
 
         with torch.no_grad():
             # initialize model to a simple piece value evaluation
-            l1 = nn.Linear(INPUT_SIZE, HIDDEN_SIZE, dtype=torch.double)
-            out = nn.Linear(HIDDEN_SIZE, 1, dtype=torch.double)
+            l1 = nn.Linear(INPUT_SIZE, HIDDEN_SIZE, dtype=torch.double, device=device)
+            out = nn.Linear(HIDDEN_SIZE, 1, dtype=torch.double, device=device)
 
             l1_params = list(l1.parameters())
             out_params = list(out.parameters())
@@ -251,45 +263,46 @@ class NNUE(nn.Module):
                             for m in sign
                         ],
                         dtype=torch.double,
+                        device=device,
                     )
                 )
 
             # by default have blank slate in output layer
             out_params[0].data = torch.tensor(
-                [[0.0001 for i in range(HIDDEN_SIZE)]], dtype=torch.double
+                [[0.0001 for i in range(HIDDEN_SIZE)]],
+                dtype=torch.double,
+                device=device,
             )
-            out_params[1].data = torch.tensor([0.0001], dtype=torch.double)
+            out_params[1].data = torch.tensor(
+                [0.0001], dtype=torch.double, device=device
+            )
 
             # white pieces
             for i in range(6):
-                l1_params[0].data[i] = pc_value((1.0, 0.0), i)
-                # scale to decipawns in output weight
-                out_params[0].data[0][i] = torch.tensor(1000, dtype=torch.double)
+                l1_params[0].data[i] = pc_value((1.0, 0.0001), i)
+                # weight assumes k = 500. should be 1000 / k.
+                out_params[0].data[0][i] = torch.tensor(
+                    2.0, dtype=torch.double, device=device
+                )
             # black pieces
             for i in range(6):
-                l1_params[0].data[i + 6] = pc_value((0.0, 1.0), i)
-                out_params[0].data[0][i + 6] = torch.tensor(-1000, dtype=torch.double)
+                l1_params[0].data[i + 6] = pc_value((0.0001, 1.0), i)
+                out_params[0].data[0][i + 6] = torch.tensor(
+                    -2.0, dtype=torch.double, device=device
+                )
             # bias
             for i in range(12):
-                l1_params[1].data[i] = torch.tensor(0.001)
+                l1_params[1].data[i] = torch.tensor(0.001, device=device)
 
         self.linear_relu_stack = nn.Sequential(l1, CReLU(), out)
 
     def forward(self, x):
         logit = self.linear_relu_stack(x)
-        # this logit, times k, gives a centipawn evaluation
+        # this logit, times k, gives a "centipawn" evaluation
 
         # return WDL space probability
-        return torch.sigmoid(logit / self.k)
+        return torch.sigmoid(logit)
 
-
-device = (
-    "cuda"
-    if torch.cuda.is_available()
-    else "mps"
-    if torch.backends.mps.is_available()
-    else "cpu"
-)
 
 ################################
 ################################
@@ -300,8 +313,8 @@ device = (
 
 def get_x_y_from_batch(batch):
     """Returns training input (X) and label (Y) for a given batch."""
-    x = torch.from_numpy(np.stack(batch["board_features"].values))
-    y = torch.from_numpy(np.stack(batch["expected_result"].values)).unsqueeze(-1)
+    x = batch[0].to(dtype=torch.double)
+    y = batch[1].unsqueeze(-1)
 
     return x, y
 
@@ -319,9 +332,14 @@ def train_loop(dataloader, model, loss_fn, optimizer) -> np.double:
 
     avg_loss = np.double(0)
 
-    for batch_idx, batch in enumerate(dataloader):
-        train_set_size = len(dataloader.dataset)
-
+    for batch_idx, batch in enumerate(
+        tqdm(
+            dataloader,
+            desc="TRAIN LOOP",
+            unit="batch",
+            postfix=dict(batch_sz=BATCH_SIZE),
+        )
+    ):
         x, y = get_x_y_from_batch(batch)
         pred = model(x)
         loss = loss_fn(pred, y)
@@ -332,8 +350,6 @@ def train_loop(dataloader, model, loss_fn, optimizer) -> np.double:
 
         if batch_idx % 32 == 0:
             loss = loss.item()
-            current = batch_idx * BATCH_SIZE + len(x)
-            print(f"loss: {loss:>7f} [{current:>5d} / {train_set_size:>5d}]")
 
     avg_loss /= len(dataloader)
     return avg_loss
@@ -352,13 +368,17 @@ def test_loop(dataloader, model, loss_fn) -> np.double:
     test_loss = np.double(0)
 
     with torch.no_grad():
-        for batch in dataloader:
+        for batch in tqdm(
+            dataloader,
+            desc=" TEST LOOP",
+            unit="batch",
+            postfix=dict(batch_sz=BATCH_SIZE),
+        ):
             x, y = get_x_y_from_batch(batch)
             pred = model(x)
             test_loss += loss_fn(pred, y).item()
 
     test_loss /= n_batches
-    print(f"avg test loss: {test_loss:>5f}\n")
     return test_loss
 
 
@@ -379,20 +399,20 @@ def train(
 
     generator = torch.Generator().manual_seed(42)
     train_dataset, test_dataset = torch.utils.data.random_split(
-        full_dataset, [0.8, 0.2], generator=generator
+        full_dataset, [0.9, 0.1], generator=generator
     )
 
     train_dataloader = DataLoader(
         train_dataset,
+        num_workers=NUM_WORKERS,
         batch_size=BATCH_SIZE,
         shuffle=True,
-        collate_fn=collate_chess_positions,
     )
     test_dataloader = DataLoader(
         test_dataset,
+        num_workers=NUM_WORKERS,
         batch_size=BATCH_SIZE,
         shuffle=True,
-        collate_fn=collate_chess_positions,
     )
 
     logging.info("Using device '%s' for training.", device)
@@ -413,6 +433,9 @@ def train(
         print(f"\nEPOCH {epoch_idx + 1} / {EPOCHS}\n---------------------------------")
         train_loss = train_loop(train_dataloader, model, loss_fn, optimizer)
         test_loss = test_loop(test_dataloader, model, loss_fn)
+
+        print(f"\navg TRAIN loss: {train_loss:>5f}")
+        print(f"avg  TEST loss: {test_loss:>5f}\n")
         if save_path:
             save_model(save_path, model, optimizer, epoch_idx)
             logging.info("Saved progress to '%s'.", save_path)
@@ -460,7 +483,7 @@ def load_model(
     Epoch number, if saved.
     """
 
-    checkpoint = torch.load(load_path, weights_only=True)
+    checkpoint = torch.load(load_path, weights_only=True, map_location=device)
     if arch := checkpoint.get("arch"):
         if arch != model.arch:
             raise ValueError(
@@ -506,4 +529,5 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     model = NNUE()
+    model.to(device)
     train(model, args.save, args.load, args.log)

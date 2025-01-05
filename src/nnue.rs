@@ -41,10 +41,10 @@ use crate::serialization::ConstCursor;
 use std::fmt::Display;
 
 // alias to easily change precision / data type
-pub(crate) type Param = i32;
+pub(crate) type Param = i16;
 
 /// Network architecture string. Reject any weights file that does not fulfill this.
-const ARCHITECTURE: &[u8] = "A03_CReLU_768_16_1_q<i4\x1b".as_bytes();
+const ARCHITECTURE: &[u8] = "A07_CReLU_768_16_1_K_q<i2\x1b".as_bytes();
 
 /// Size of the input feature tensor.
 pub const INP_TENSOR_SIZE: usize = N_COLORS * N_PIECES * N_SQUARES;
@@ -68,6 +68,7 @@ const BIN_SIZE: usize = std::mem::size_of::<NNUEParameters>() + ARCHITECTURE.len
 #[derive(Debug)]
 struct NNUEParameters {
     _sanity_check: [Param; 1],
+    k: [Param; 1],
     l1_w: [[Param; INP_TENSOR_SIZE]; L1_SIZE],
     l1_b: [Param; L1_SIZE],
     out_w: [[Param; L1_SIZE]; OUT_SIZE],
@@ -94,6 +95,7 @@ impl NNUEParameters {
 
         NNUEParameters {
             _sanity_check: cursor.read(),
+            k: cursor.read(),
             l1_w: cursor.read2d(),
             l1_b: cursor.read(),
             out_w: cursor.read2d(),
@@ -201,6 +203,9 @@ impl Nnue {
             }
         }
 
+        // scaling factor
+        out[0] *= EvalInt::from(WEIGHTS.k[0]);
+
         // dequantization step
         out[0] /= EvalInt::from(L1_SCALE * OUT_SCALE);
 
@@ -239,14 +244,12 @@ mod tests {
         let mut nnue = Nnue::new();
         for i in 0..INP_TENSOR_SIZE {
             nnue.bit_set(i, true);
-            nnue.bit_set(i, false);
-            nnue.bit_set(i, true);
         }
 
-        let epsilon = 1;
+        let epsilon = 50;
 
         let got = nnue.output();
-        let expected = WEIGHTS._sanity_check[0];
+        let expected = EvalInt::from(WEIGHTS._sanity_check[0]);
 
         assert!((got - expected).abs() < epsilon, "NNUE state:\n{:?}\n\ngot {:?}, expected {:?}", nnue, got, expected)
     }
