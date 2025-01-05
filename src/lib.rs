@@ -32,6 +32,7 @@ pub mod prelude;
 use crate::fen::{FromFen, ToFen, START_POSITION};
 use crate::hash::Zobrist;
 use crate::movegen::GenAttackers;
+use std::ops;
 
 pub const BOARD_WIDTH: usize = 8;
 pub const BOARD_HEIGHT: usize = 8;
@@ -346,23 +347,31 @@ impl From<Piece> for char {
 pub struct Bitboard(u64);
 
 impl Bitboard {
-    pub fn on_sq(&mut self, idx: Square) {
+    pub const fn on_sq(&mut self, idx: Square) {
         //! Set a square on.
-        self.0 |= 1 << usize::from(idx);
+        self.0 |= 1 << idx.0;
     }
 
-    pub fn off_sq(&mut self, idx: Square) {
+    pub const fn off_sq(&mut self, idx: Square) {
         //! Set a square off.
-        self.0 &= !(1 << usize::from(idx));
+        self.0 &= !(1 << idx.0);
     }
 
-    pub fn get_sq(&self, idx: Square) -> bool {
+    pub const fn get_sq(&self, idx: Square) -> bool {
         //! Read the value at a square.
-        (self.0 & 1 << usize::from(idx)) == 1
+        (self.0 & 1 << idx.0) == 1
     }
 
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.0 == 0
+    }
+}
+
+impl ops::BitAnd for Bitboard {
+    type Output = Self;
+
+    fn bitand(self, rhs: Self) -> Self::Output {
+        Self(self.0 & rhs.0)
     }
 }
 
@@ -615,6 +624,9 @@ pub struct Board {
     /// Player bitboards
     players: [PlayerBoards; N_COLORS],
 
+    /// Bitboard for all pieces of all color.
+    occupancy: Bitboard,
+
     /// Mailbox (array) board. Location -> piece.
     mail: Mailbox,
 
@@ -681,46 +693,60 @@ impl Board {
     }
 
     /// Create a new piece in a location, and pop any existing piece in the destination.
-    pub fn set_piece(&mut self, sq: Square, pc: ColPiece) -> Option<ColPiece> {
-        let dest_pc = self.del_piece(sq);
-        let pl = &mut self[pc.col];
-        pl[pc.into()].on_sq(sq);
+    pub fn set_piece(
+        &mut self,
+        sq: Square,
+        pc: ColPiece,
+        update_metrics: bool,
+    ) -> Option<ColPiece> {
+        let dest_pc = self.del_piece(sq, update_metrics);
+        self[pc.col][pc.pc].on_sq(sq);
+        self.occupancy.on_sq(sq);
         *self.mail.sq_mut(sq) = Some(pc);
-        self.nnue.add_piece(pc, sq);
-        self.zobrist.toggle_pc(&pc, &sq);
+        if update_metrics {
+            self.nnue.add_piece(pc, sq);
+            self.zobrist.toggle_pc(&pc, &sq);
+        }
         dest_pc
     }
 
     /// Set the piece (or no piece) in a square, and return ("pop") the existing piece.
-    pub fn set_square(&mut self, idx: Square, pc: Option<ColPiece>) -> Option<ColPiece> {
+    pub fn set_square(
+        &mut self,
+        idx: Square,
+        pc: Option<ColPiece>,
+        update_metrics: bool,
+    ) -> Option<ColPiece> {
         match pc {
-            Some(pc) => self.set_piece(idx, pc),
-            None => self.del_piece(idx),
+            Some(pc) => self.set_piece(idx, pc, update_metrics),
+            None => self.del_piece(idx, update_metrics),
         }
     }
 
     /// Delete the piece in a location, and return ("pop") that piece.
-    pub fn del_piece(&mut self, sq: Square) -> Option<ColPiece> {
+    pub fn del_piece(&mut self, sq: Square, update_metrics: bool) -> Option<ColPiece> {
         if let Some(pc) = *self.mail.sq_mut(sq) {
-            let pl = &mut self[pc.col];
-            pl[pc.into()].off_sq(sq);
+            self[pc.col][pc.pc].off_sq(sq);
+            self.occupancy.off_sq(sq);
             *self.mail.sq_mut(sq) = None;
-            self.nnue.del_piece(pc, sq);
-            self.zobrist.toggle_pc(&pc, &sq);
+            if update_metrics {
+                self.nnue.del_piece(pc, sq);
+                self.zobrist.toggle_pc(&pc, &sq);
+            }
             Some(pc)
         } else {
             None
         }
     }
 
-    fn move_piece(&mut self, src: Square, dest: Square) {
-        let pc = self.del_piece(src).unwrap_or_else(|| {
+    pub fn move_piece(&mut self, src: Square, dest: Square, update_metrics: bool) {
+        let pc = self.del_piece(src, update_metrics).unwrap_or_else(|| {
             panic!(
                 "move ({src} -> {dest}) should have piece at source (pos '{}')",
                 self.to_fen()
             )
         });
-        self.set_piece(dest, pc);
+        self.set_piece(dest, pc, update_metrics);
     }
 
     /// Get the piece at a location.
@@ -751,7 +777,7 @@ impl Board {
                 col: pc.col.flip(),
                 pc: pc.pc,
             });
-            new_board.set_square(sq, opt_pc);
+            new_board.set_square(sq, opt_pc, true);
         }
         new_board
     }

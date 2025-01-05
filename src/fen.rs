@@ -130,6 +130,7 @@ impl FromFen for Board {
                                 Square::from_row_col(real_row, col)
                                     .or(Err(FenError::InternalError(i)))?,
                                 pc,
+                                true,
                             );
                             col += 1;
                             parser_state = FenState::Piece(row, col)
