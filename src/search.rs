@@ -223,6 +223,8 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Vec<M
     let is_repetition_draw = board.is_repetition();
     let is_in_check = board.is_check(board.turn);
 
+    let do_extension = is_in_check;
+
     // positive here since we're looking from the opposite perspective.
     // if white caused a draw, then we'd be black here.
     // therefore, white would see a negative value for the draw.
@@ -350,13 +352,6 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Vec<M
     }
 
     for (_priority, mv) in mvs {
-        // probably interesting lines to check deeper
-        let do_extension = is_in_check
-            || matches!(
-                mv.move_type,
-                MoveType::Promotion(crate::movegen::PromotePiece::Queen)
-            );
-
         let anti_mv = mv.make(board);
         let (continuation, score) = minmax(
             board,
