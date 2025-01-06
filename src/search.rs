@@ -351,7 +351,11 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Vec<M
 
     for (_priority, mv) in mvs {
         // probably interesting lines to check deeper
-        let do_extension = is_in_check || matches!(mv.move_type, MoveType::Promotion(_));
+        let do_extension = is_in_check
+            || matches!(
+                mv.move_type,
+                MoveType::Promotion(crate::movegen::PromotePiece::Queen)
+            );
 
         let anti_mv = mv.make(board);
         let (continuation, score) = minmax(
