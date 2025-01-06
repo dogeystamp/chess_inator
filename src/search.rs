@@ -221,6 +221,10 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Vec<M
     }
 
     let is_repetition_draw = board.is_repetition();
+    let is_in_check = board.is_check(board.turn);
+
+    let do_extension = is_in_check;
+
     // positive here since we're looking from the opposite perspective.
     // if white caused a draw, then we'd be black here.
     // therefore, white would see a negative value for the draw.
@@ -231,11 +235,11 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Vec<M
     let mut board_eval: Option<EvalInt> = None;
 
     if mm.quiesce {
-        board_eval = Some(if is_repetition_draw {
-            contempt
+        board_eval = if is_repetition_draw {
+            Some(contempt)
         } else {
-            board.eval() * EvalInt::from(board.turn.sign())
-        });
+            Some(board.eval() * EvalInt::from(board.turn.sign()))
+        }
     }
 
     if mm.depth == 0 {
@@ -265,7 +269,8 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Vec<M
         /// Only evaluate a single move.
         None,
     }
-    let mut move_generator = if mm.quiesce {
+    let mut move_generator = if mm.quiesce && !is_in_check {
+        // if in check, we need to find all possible evasions
         MoveGenerator::Quiescence
     } else {
         MoveGenerator::Normal
@@ -313,8 +318,9 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Vec<M
 
     let mut abs_best = SearchEval::Exact(EVAL_WORST);
 
-    if mm.quiesce {
+    if mm.quiesce && !is_in_check {
         // stand pat
+        // (when in check, we don't have the option to "do nothing")
         abs_best = SearchEval::Exact(board_eval.unwrap());
     }
 
@@ -332,11 +338,10 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Vec<M
     }
 
     if mvs.is_empty() {
-        if mm.quiesce {
+        if mm.quiesce && !is_in_check {
             // use stand pat
             return (Vec::new(), SearchEval::Exact(board_eval.unwrap()));
         }
-        let is_in_check = board.is_check(board.turn);
 
         if is_in_check {
             return (Vec::new(), SearchEval::Checkmate(-1));
@@ -352,7 +357,7 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Vec<M
             board,
             state,
             MinmaxState {
-                depth: mm.depth - 1,
+                depth: mm.depth - if do_extension { 0 } else { 1 },
                 alpha: Some(-beta),
                 beta: Some(-alpha),
                 quiesce: mm.quiesce,
