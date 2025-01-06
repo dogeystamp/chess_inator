@@ -45,9 +45,14 @@ NUM_WORKERS = 0
 
 LAMBDA = 0.92
 """
-Interpolation coefficient between expected win probability, and real win probability.
+(Default) interpolation coefficient between expected win probability, and real win probability.
 
-0 discards the engine label completely, and 1 discards the real game result completely.
+To set this, use the `--lambda` command-line flag.
+
+0 discards the engine label completely, and 1 discards the real game result
+completely. Using a naive material-counting engine in the analysis, this default
+value should work. For a smarter engine, use a higher value, like 0.97, so that
+it can go through reinforcement learning based on its existing knowledge.
 """
 
 LEARN_RATE = 1e-3
@@ -84,6 +89,11 @@ parser.add_argument(
     "--log",
     type=Path,
     help="Path to log (as .csv) the results of the loss function.",
+)
+parser.add_argument(
+    "--lambda",
+    type=float,
+    help="Interpolation coefficient. 0.0 uses the engine label, and 1.0 uses the game result as a label.",
 )
 
 

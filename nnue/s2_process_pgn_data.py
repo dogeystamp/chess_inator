@@ -88,7 +88,7 @@ logging.basicConfig(level=getattr(logging, str.upper(args.log)))
 
 
 """Skip these many plies from the start (avoid training on opening)."""
-SKIP_PLIES: int = 20
+SKIP_PLIES: int = 5
 
 
 output_queue: Queue[tuple[str, str, int, Literal[-1, 0, 1]]] = Queue()

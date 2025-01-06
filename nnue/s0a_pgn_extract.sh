@@ -12,9 +12,9 @@
 
 # Filters lichess PGN databases (https://database.nikonoel.fr/) using pgn-extract (https://github.com/MichaelB7/pgn-extract).
 #
-# - Require 20 plies at least
+# - Require 10 plies at least
 # - Discard forfeits
-# - Require >= 2800 rating
+# - Require at least 5 minutes time control
 #
 # Usage:
 #
@@ -23,9 +23,9 @@
 TAGFILE="$(mktemp)"
 cat << EOF > "$TAGFILE"
 Termination "Normal"
-Elo >= "2800"
+TimeControl >= "300"
 EOF
 
-pgn-extract -pl20 -t "$TAGFILE" $@
+pgn-extract -pl10 -t "$TAGFILE" $@
 
 rm "$TAGFILE"
