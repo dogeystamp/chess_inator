@@ -78,7 +78,7 @@ parser.add_argument(
     "--time-limit",
     type=float,
     help="Duration limit in seconds for each ply to be analyzed.",
-    default=0.2
+    default=0.3,
 )
 parser.add_argument("files", nargs="+", type=Path)
 args = parser.parse_args()
@@ -117,7 +117,7 @@ async def worker(game_generator: AsyncIterator[pgn.Game]) -> None:
     Puts rows of output into a global queue.
     """
     transport, engine = await chess.engine.popen_uci(args.engine)
-    await engine.configure(dict(NNUETrainInfo="true"))
+    await engine.configure(dict(NNUETrainInfo="true", Hash="128"))
 
     async for game in game_generator:
         wdl: int | None = None
