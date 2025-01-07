@@ -450,7 +450,7 @@ fn iter_deep(board: &mut Board, state: &mut EngineState) -> (Vec<Move>, SearchEv
 
     state.interrupts = InterruptMode::Normal;
     if let Some(hard_lim) = state.time_lims.hard {
-        if hard_lim.saturating_duration_since(Instant::now()).as_secs() < 8 {
+        if hard_lim.saturating_duration_since(Instant::now()).as_secs() < 1 {
             // time trouble; don't spend too much time in moves
             state.interrupts = InterruptMode::Frequent;
         }
