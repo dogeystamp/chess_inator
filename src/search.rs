@@ -290,7 +290,7 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Vec<M
     if state.config.enable_trans_table {
         if let Some(entry) = &state.cache[board.zobrist] {
             trans_table_move = Some(entry.best_move);
-            if entry.is_qsearch == mm.quiesce && entry.depth >= mm.depth {
+            if entry.is_qsearch == mm.quiesce && usize::from(entry.depth) >= mm.depth {
                 if let SearchEval::Exact(_) | SearchEval::Upper(_) = entry.eval {
                     // at this point, we could just return the best move + eval given, but this
                     // bypasses the draw by repetition checks in `minmax`. so just don't generate
@@ -406,12 +406,17 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Vec<M
     if let Some(best_move) = best_move {
         best_continuation.push(best_move);
         if state.config.enable_trans_table {
-            state.cache[board.zobrist] = Some(TranspositionEntry {
-                best_move,
-                eval: abs_best,
-                depth: mm.depth,
-                is_qsearch: mm.quiesce,
-            });
+            state.cache.save_entry(
+                board.zobrist,
+                TranspositionEntry {
+                    best_move,
+                    eval: abs_best,
+                    depth: u8::try_from(mm.depth).unwrap(),
+                    is_qsearch: mm.quiesce,
+                    // `as u8` will wrap around to 0, but that's accounted for
+                    age: board.full_moves as u8,
+                },
+            );
         }
     }
 
@@ -419,16 +424,100 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Vec<M
     (best_continuation, abs_best)
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct TranspositionEntry {
     /// best move found last time
     best_move: Move,
     /// last time's eval
     eval: SearchEval,
     /// depth of this entry
-    depth: usize,
+    depth: u8,
     /// is this score within the context of quiescence
     is_qsearch: bool,
+    /// move number when this entry was saved
+    age: u8,
+}
+
+impl Ord for TranspositionEntry {
+    /// the "bigger" entry has higher priority to stay in the table
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        if self.depth >= other.depth {
+            return std::cmp::Ordering::Greater;
+        }
+
+        let mut age_diff = self.age.wrapping_sub(other.age);
+        if age_diff > 200 {
+            // wrapped around, so flip
+            // e.g. if you see 255 and 0, 0 is the recent one
+            age_diff = other.age.wrapping_sub(self.age)
+        }
+
+        if age_diff * 2 >= (other.depth - self.depth) {
+            std::cmp::Ordering::Greater
+        } else {
+            std::cmp::Ordering::Less
+        }
+    }
+}
+
+impl PartialOrd for TranspositionEntry {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+#[cfg(test)]
+mod replacement_test {
+    use super::*;
+
+    #[test]
+    fn ordering() {
+        let e1 = TranspositionEntry {
+            best_move: Move {
+                src: Square(0),
+                dest: Square(0),
+                move_type: crate::movegen::MoveType::Normal,
+            },
+            eval: SearchEval::Exact(0),
+            depth: 2,
+            is_qsearch: false,
+            age: 0,
+        };
+        let e2 = TranspositionEntry {
+            age: 255,
+            depth: 2,
+            ..e1
+        };
+        assert!(e1 > e2);
+
+        let e3 = TranspositionEntry {
+            age: 0,
+            depth: 2,
+            ..e1
+        };
+        assert!(e3 > e1);
+
+        let e4 = TranspositionEntry {
+            age: 1,
+            depth: 2,
+            ..e1
+        };
+        assert!(e4 > e1);
+
+        let e5 = TranspositionEntry {
+            age: 1,
+            depth: 1,
+            ..e1
+        };
+        assert!(e5 > e1);
+
+        let e6 = TranspositionEntry {
+            age: 0,
+            depth: 1,
+            ..e1
+        };
+        assert!(e6 < e1);
+    }
 }
 
 pub type TranspositionTable = ZobristTable<TranspositionEntry>;

@@ -135,7 +135,7 @@ impl<T: Copy> ZobristTable<T> {
 }
 
 impl<T> IndexMut<Zobrist> for ZobristTable<T> {
-    /// Overwrite a table entry.
+    /// Overwrite a table entry (always replace strategy).
     ///
     /// If you `mut`ably index, it will automatically wipe an existing entry,
     /// regardless of it was a cache hit or miss.
@@ -158,6 +158,35 @@ impl<T> Index<Zobrist> for ZobristTable<T> {
         } else {
             // miss
             &None
+        }
+    }
+}
+
+impl<T: Ord> ZobristTable<T> {
+    /// Attempt to save an entry to the Zobrist table.
+    ///
+    /// If there is an existing entry (due to a hash collision), `Ord` comparison will be used, and
+    /// the "biggest" (most important) entry is kept.
+    ///
+    /// For an "always replace" replacement scheme, try using the `IndexMut` interface to save
+    /// entries to the table.
+    pub(crate) fn save_entry(&mut self, zobrist: Zobrist, entry: T) {
+        let idx = zobrist.truncate_hash(self.size);
+        let existing_data = &self.data[idx];
+
+        let mut overwrite = false;
+
+        if let Some(existing_entry) = &existing_data.1 {
+            if entry > *existing_entry {
+                overwrite = true;
+            }
+        } else {
+            overwrite = true;
+        }
+
+        if overwrite {
+            self.data[idx].0 = zobrist;
+            self.data[idx].1 = Some(entry);
         }
     }
 }
@@ -264,6 +293,32 @@ mod tests {
         assert_eq!(table[z!(big_number + 3)], None);
 
         assert_eq!(table[z!(big_number + 19)], Some(5));
+
+        eprintln!("{table:?}");
+    }
+
+    #[test]
+    fn test_replacement() {
+        let mut table = ZobristTable::<usize>::new_n(4);
+
+        macro_rules! z {
+            ($i: expr) => {
+                Zobrist { hash: $i }
+            };
+        }
+
+        let big_number = 1 << 62;
+
+        table.save_entry(z!(big_number + 19), 5);
+        table.save_entry(z!(big_number + 3), 4);
+
+        // newer entry is less important, should not clobber
+        assert_eq!(table[z!(big_number + 19)], Some(5));
+
+        // should clobber now
+        table.save_entry(z!(big_number + 3), 6);
+        assert_eq!(table[z!(big_number + 3)], Some(6));
+        assert_eq!(table[z!(big_number + 19)], None);
 
         eprintln!("{table:?}");
     }

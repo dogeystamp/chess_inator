@@ -78,8 +78,8 @@ cp target/release/chess_inator engine2
 OUTPUT=$(mktemp)
 
 fastchess \
-	-engine cmd=engine1 name="c_i $TAG1 ($COMM1)" option.Hash=384 \
-	-engine cmd=engine2 name="c_i $TAG2 ($COMM2)" option.Hash=384 \
+	-engine cmd=engine1 name="c_i $TAG1 ($COMM1)" option.Hash=500 \
+	-engine cmd=engine2 name="c_i $TAG2 ($COMM2)" option.Hash=500 \
 	-pgnout file="$PGN" \
 	timeleft=true \
 	$@ \
