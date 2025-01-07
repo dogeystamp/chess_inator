@@ -53,7 +53,7 @@ fn cmd_uci() -> String {
     let str = "id name chess_inator\n\
                id author dogeystamp\n\
                option name NNUETrainInfo type check default false\n\
-               option name Hash type spin default 16\n\
+               option name Hash type spin default 16 min 1 max 6200\n\
                uciok";
     str.into()
 }
