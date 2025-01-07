@@ -590,13 +590,13 @@ impl TimeLimits {
         let mut soft_ms = 1_500;
 
         // in some situations we can think longer
-        if board.full_moves >= 15 {
+        if board.full_moves >= 6 {
             soft_ms = if ourtime_ms > 300_000 {
                 3_000
             } else if ourtime_ms > 600_000 {
-                5_000
+                10_000
             } else if ourtime_ms > 1_200_000 {
-                8_000
+                20_000
             } else {
                 soft_ms
             }
