@@ -1099,6 +1099,7 @@ mod tests {
             rx,
             cache,
             search::TimeLimits::default(),
+            search::InterruptMode::MustComplete,
         );
 
         let (line, eval) = best_line(&mut board, &mut engine_state);
@@ -1135,6 +1136,7 @@ mod tests {
             rx,
             cache,
             search::TimeLimits::default(),
+            search::InterruptMode::MustComplete,
         );
 
         let (_line, eval) = best_line(&mut board, &mut engine_state);

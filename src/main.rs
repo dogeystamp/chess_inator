@@ -323,6 +323,7 @@ fn task_engine(tx_main: Sender<MsgToMain>, rx_engine: Receiver<MsgToEngine>) {
             rx_engine,
             TranspositionTable::new(conf.transposition_size),
             TimeLimits::default(),
+            InterruptMode::default(),
         );
 
         loop {

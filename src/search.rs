@@ -179,8 +179,6 @@ struct MinmaxState {
     beta: Option<EvalInt>,
     /// quiescence search flag
     quiesce: bool,
-    /// flag to disable stopping on the first depth, to avoid not having a move
-    allow_stop: bool,
 }
 
 /// Search the game tree to find the absolute (positive good) move and corresponding eval for the
@@ -199,25 +197,33 @@ struct MinmaxState {
 /// The best line (in reverse move order), and its corresponding absolute eval for the current player.
 fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Vec<Move>, SearchEval) {
     // occasionally check if we should stop the engine
-    if mm.allow_stop && state.node_count % (1 << 12) == 0 {
-        // respect the hard stop if given
-        match state.rx_engine.try_recv() {
-            Ok(msg) => match msg {
-                MsgToEngine::Go(_) => panic!("received go while thinking"),
-                MsgToEngine::Stop => {
+    let interrupt_cycle = match state.interrupts {
+        InterruptMode::Frequent => Some(1 << 12),
+        InterruptMode::Normal => Some(1 << 16),
+        InterruptMode::MustComplete => None,
+    };
+
+    if let Some(interrupt_cycle) = interrupt_cycle {
+        if state.node_count % (interrupt_cycle) == 0 {
+            // respect the hard stop if given
+            match state.rx_engine.try_recv() {
+                Ok(msg) => match msg {
+                    MsgToEngine::Go(_) => panic!("received go while thinking"),
+                    MsgToEngine::Stop => {
+                        return (Vec::new(), SearchEval::Stopped);
+                    }
+                    MsgToEngine::NewGame => panic!("received newgame while thinking"),
+                },
+                Err(e) => match e {
+                    mpsc::TryRecvError::Empty => {}
+                    mpsc::TryRecvError::Disconnected => panic!("thread Main stopped"),
+                },
+            }
+
+            if let Some(hard) = state.time_lims.hard {
+                if Instant::now() > hard {
                     return (Vec::new(), SearchEval::Stopped);
                 }
-                MsgToEngine::NewGame => panic!("received newgame while thinking"),
-            },
-            Err(e) => match e {
-                mpsc::TryRecvError::Empty => {}
-                mpsc::TryRecvError::Disconnected => panic!("thread Main stopped"),
-            },
-        }
-
-        if let Some(hard) = state.time_lims.hard {
-            if Instant::now() > hard {
-                return (Vec::new(), SearchEval::Stopped);
             }
         }
     }
@@ -258,7 +264,6 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Vec<M
                     alpha: mm.alpha,
                     beta: mm.beta,
                     quiesce: true,
-                    allow_stop: mm.allow_stop,
                 },
             );
         }
@@ -364,7 +369,6 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Vec<M
                 alpha: Some(-beta),
                 beta: Some(-alpha),
                 quiesce: mm.quiesce,
-                allow_stop: mm.allow_stop,
             },
         );
         anti_mv.unmake(board);
@@ -431,6 +435,8 @@ pub type TranspositionTable = ZobristTable<TranspositionEntry>;
 
 /// Iteratively deepen search until it is stopped.
 fn iter_deep(board: &mut Board, state: &mut EngineState) -> (Vec<Move>, SearchEval) {
+    state.interrupts = InterruptMode::MustComplete;
+
     let (mut prev_line, mut prev_eval) = minmax(
         board,
         state,
@@ -439,9 +445,16 @@ fn iter_deep(board: &mut Board, state: &mut EngineState) -> (Vec<Move>, SearchEv
             alpha: None,
             beta: None,
             quiesce: false,
-            allow_stop: false,
         },
     );
+
+    state.interrupts = InterruptMode::Normal;
+    if let Some(hard_lim) = state.time_lims.hard {
+        if hard_lim.saturating_duration_since(Instant::now()).as_secs() < 8 {
+            // time trouble; don't spend too much time in moves
+            state.interrupts = InterruptMode::Frequent;
+        }
+    }
 
     for depth in 2..=state.config.depth {
         let (line, eval) = minmax(
@@ -452,7 +465,6 @@ fn iter_deep(board: &mut Board, state: &mut EngineState) -> (Vec<Move>, SearchEv
                 alpha: None,
                 beta: None,
                 quiesce: false,
-                allow_stop: true,
             },
         );
 
@@ -525,6 +537,18 @@ impl TimeLimits {
     }
 }
 
+/// How often to check for interrupts because of time or a `stop` command.
+#[derive(Default)]
+pub enum InterruptMode {
+    /// Frequently check for interrupts to avoid going over the time limit.
+    Frequent,
+    /// Disable all interrupts.
+    MustComplete,
+    /// Relatively infrequent checks for interrupts.
+    #[default]
+    Normal,
+}
+
 /// Helper type to avoid retyping the same arguments into every function prototype.
 ///
 /// This should be owned outside the actual thinking part so that the engine can remember state
@@ -537,6 +561,8 @@ pub struct EngineState {
     /// Nodes traversed (i.e. number of times minmax called)
     pub node_count: usize,
     pub time_lims: TimeLimits,
+    /// Sets how often Engine checks for Main thread interrupts
+    pub interrupts: InterruptMode,
 }
 
 impl EngineState {
@@ -545,6 +571,7 @@ impl EngineState {
         interface: mpsc::Receiver<MsgToEngine>,
         cache: TranspositionTable,
         time_lims: TimeLimits,
+        interrupts: InterruptMode,
     ) -> Self {
         Self {
             config,
@@ -552,6 +579,7 @@ impl EngineState {
             cache,
             node_count: 0,
             time_lims,
+            interrupts,
         }
     }
 
@@ -618,6 +646,7 @@ mod tests {
             rx,
             cache,
             TimeLimits::from_movetime(20),
+            InterruptMode::MustComplete,
         );
         let mut board =
             Board::from_fen("2rq1rk1/pp1bbppp/3p4/4p1B1/2B1P1n1/1PN5/P1PQ1PPP/R3K2R w KQ - 1 14")
