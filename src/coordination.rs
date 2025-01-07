@@ -177,7 +177,6 @@ pub enum MsgToMain {
 
 pub struct GoMessage {
     pub board: Board,
-    pub config: SearchConfig,
     pub time_lims: TimeLimits,
 }
 
@@ -186,6 +185,8 @@ pub enum MsgToEngine {
     /// `go` command. Also sends board position and engine configuration to avoid state
     /// synchronization issues (i.e. avoid sending position after a go command, and not before).
     Go(Box<GoMessage>),
+    /// Transmit configuration settings.
+    Configure(SearchConfig),
     /// Hard stop command. Halt search immediately.
     Stop,
     /// Ask the engine to wipe its state (notably transposition table).

@@ -53,6 +53,7 @@ fn cmd_uci() -> String {
     let str = "id name chess_inator\n\
                id author dogeystamp\n\
                option name NNUETrainInfo type check default false\n\
+               option name Hash type spin default 16\n\
                uciok";
     str.into()
 }
@@ -157,9 +158,12 @@ fn cmd_go(mut tokens: std::str::SplitWhitespace<'_>, state: &mut MainState) {
 
     state
         .tx_engine
+        .send(MsgToEngine::Configure(state.config))
+        .unwrap();
+    state
+        .tx_engine
         .send(MsgToEngine::Go(Box::new(GoMessage {
             board: state.board,
-            config: state.config,
             time_lims,
         })))
         .unwrap();
@@ -205,6 +209,13 @@ fn cmd_setoption(mut tokens: std::str::SplitWhitespace<'_>, state: &mut MainStat
                                 }
                             }
                         }
+                        "Hash" => {
+                            if let Some(value) = get_val(tokens) {
+                                if let Ok(value) = value.parse::<usize>() {
+                                    state.config.transposition_size = value;
+                                }
+                            }
+                        }
                         _ => {
                             println!("info string Unknown option: {}", name)
                         }
@@ -230,6 +241,10 @@ fn cmd_root(mut tokens: std::str::SplitWhitespace<'_>, state: &mut MainState) {
             }
             "ucinewgame" => {
                 if matches!(state.uci_mode.mode, UCIMode::Idle) {
+                    state
+                        .tx_engine
+                        .send(MsgToEngine::Configure(state.config))
+                        .unwrap();
                     state.tx_engine.send(MsgToEngine::NewGame).unwrap();
                     state.board = Board::starting_pos();
                 }
@@ -329,9 +344,9 @@ fn task_engine(tx_main: Sender<MsgToMain>, rx_engine: Receiver<MsgToEngine>) {
         loop {
             let msg = state.rx_engine.recv().unwrap();
             match msg {
+                MsgToEngine::Configure(cfg) => state.config = cfg,
                 MsgToEngine::Go(msg_box) => {
                     let mut board = msg_box.board;
-                    state.config = msg_box.config;
                     state.time_lims = msg_box.time_lims;
                     let (pv, eval) = best_line(&mut board, &mut state);
 

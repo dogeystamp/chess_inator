@@ -99,16 +99,37 @@ pub struct ZobristTable<T> {
     size: usize,
 }
 
+/// Convert a transposition table size in mebibytes to a number of entries.
+///
+/// The number of entries is rounded to the lower power of 2.
+pub fn mib_to_n<T: Sized>(mib: usize) -> usize {
+    let bytes = mib * (1 << 20);
+    let entry_size = std::mem::size_of::<T>();
+
+    let entries = bytes / entry_size;
+    if entries == 0 {
+        0
+    } else {
+        entries.ilog2().try_into().unwrap()
+    }
+}
+
 impl<T: Copy> ZobristTable<T> {
-    /// Create a table with 2^n entries.
-    pub fn new(size: usize) -> Self {
+    /// Create a Zobrist-keyed table.
+    pub fn new(size_mib: usize) -> Self {
         assert!(
-            size <= 27,
-            "Attempted to make 2^{size} entry table; aborting to avoid excessive memory usage."
+            size_mib <= 12000,
+            "Attempted to make {size_mib} MiB hash table; aborting to avoid excessive memory usage."
         );
+        let size = mib_to_n::<T>(size_mib);
+        Self::new_n(size)
+    }
+
+    /// Create a table with 2^n entries.
+    pub fn new_n(size_exp: usize) -> Self {
         ZobristTable {
-            data: vec![(Zobrist { hash: 0 }, None); 1 << size],
-            size,
+            data: vec![(Zobrist { hash: 0 }, None); 1 << size_exp],
+            size: size_exp,
         }
     }
 }
@@ -226,7 +247,7 @@ mod tests {
 
     #[test]
     fn test_table() {
-        let mut table = ZobristTable::<usize>::new(4);
+        let mut table = ZobristTable::<usize>::new_n(4);
 
         macro_rules! z {
             ($i: expr) => {

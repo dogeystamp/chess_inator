@@ -122,7 +122,7 @@ pub struct SearchConfig {
     pub contempt: EvalInt,
     /// Enable transposition table.
     pub enable_trans_table: bool,
-    /// Transposition table size (2^n where this is n)
+    /// Transposition table size (in MiB)
     pub transposition_size: usize,
     /// Print machine-readable information about the position during NNUE training data generation.
     pub nnue_train_info: bool,
@@ -136,7 +136,7 @@ impl Default for SearchConfig {
             qdepth: 6,
             contempt: 0,
             enable_trans_table: true,
-            transposition_size: 24,
+            transposition_size: 16,
             nnue_train_info: false,
         }
     }
@@ -208,6 +208,7 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Vec<M
             match state.rx_engine.try_recv() {
                 Ok(msg) => match msg {
                     MsgToEngine::Go(_) => panic!("received go while thinking"),
+                    MsgToEngine::Configure(cfg) => state.config = cfg,
                     MsgToEngine::Stop => {
                         return (Vec::new(), SearchEval::Stopped);
                     }
