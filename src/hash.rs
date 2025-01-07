@@ -162,7 +162,12 @@ impl<T> Index<Zobrist> for ZobristTable<T> {
     }
 }
 
-impl<T: Ord> ZobristTable<T> {
+pub trait TableReplacement {
+    /// Do we replace `other`?
+    fn replaces(&self, other: &Self) -> bool;
+}
+
+impl<T: TableReplacement> ZobristTable<T> {
     /// Attempt to save an entry to the Zobrist table.
     ///
     /// If there is an existing entry (due to a hash collision), `Ord` comparison will be used, and
@@ -177,7 +182,7 @@ impl<T: Ord> ZobristTable<T> {
         let mut overwrite = false;
 
         if let Some(existing_entry) = &existing_data.1 {
-            if entry > *existing_entry {
+            if entry.replaces(existing_entry) {
                 overwrite = true;
             }
         } else {
@@ -295,6 +300,12 @@ mod tests {
         assert_eq!(table[z!(big_number + 19)], Some(5));
 
         eprintln!("{table:?}");
+    }
+
+    impl crate::hash::TableReplacement for usize {
+        fn replaces(&self, other: &Self) -> bool {
+            self >= other
+        }
     }
 
     #[test]
