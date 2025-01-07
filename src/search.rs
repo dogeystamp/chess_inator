@@ -198,7 +198,6 @@ struct MinmaxState {
 fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Vec<Move>, SearchEval) {
     // occasionally check if we should stop the engine
     let interrupt_cycle = match state.interrupts {
-        InterruptMode::Frequent => Some(1 << 12),
         InterruptMode::Normal => Some(1 << 16),
         InterruptMode::MustComplete => None,
     };
@@ -449,12 +448,6 @@ fn iter_deep(board: &mut Board, state: &mut EngineState) -> (Vec<Move>, SearchEv
     );
 
     state.interrupts = InterruptMode::Normal;
-    if let Some(hard_lim) = state.time_lims.hard {
-        if hard_lim.saturating_duration_since(Instant::now()).as_secs() < 1 {
-            // time trouble; don't spend too much time in moves
-            state.interrupts = InterruptMode::Frequent;
-        }
-    }
 
     for depth in 2..=state.config.depth {
         let (line, eval) = minmax(
@@ -540,11 +533,9 @@ impl TimeLimits {
 /// How often to check for interrupts because of time or a `stop` command.
 #[derive(Default)]
 pub enum InterruptMode {
-    /// Frequently check for interrupts to avoid going over the time limit.
-    Frequent,
     /// Disable all interrupts.
     MustComplete,
-    /// Relatively infrequent checks for interrupts.
+    /// Checks for interrupts.
     #[default]
     Normal,
 }
