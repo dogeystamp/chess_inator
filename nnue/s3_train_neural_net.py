@@ -59,6 +59,16 @@ LEARN_RATE = 1e-3
 BATCH_SIZE = 16384
 EPOCHS = 20
 
+# neural net architecture
+
+HIDDEN_SIZE = 16
+"""Hidden layer size."""
+
+INPUT_SIZE = 2 * 6 * 64  # 768
+"""Board feature input size."""
+
+ARCHITECTURE = f"A08_CReLU_{INPUT_SIZE}_{HIDDEN_SIZE}_K"
+"""Unique ID / version for this architecture."""
 
 ################################
 ################################
@@ -77,13 +87,13 @@ parser.add_argument(
     "--save",
     type=Path,
     help="Path to save trained model to.",
-    default=Path("weights.pth"),
+    default=Path(f"weights_{ARCHITECTURE}.pth"),
 )
 parser.add_argument(
     "--load",
     type=Path,
     help="Path to load trained model from.",
-    default=Path("weights.pth"),
+    default=Path(f"weights_{ARCHITECTURE}.pth"),
 )
 parser.add_argument(
     "--log",
@@ -225,15 +235,6 @@ def tune_sigmoid(cp, wdl) -> np.double:
 ## neural net architecture
 ################################
 ################################
-
-ARCHITECTURE = "A07_CReLU_768_16_1_K"
-"""Unique ID / version for this architecture."""
-
-INPUT_SIZE = 2 * 6 * 64  # 768
-"""Board feature input size."""
-
-HIDDEN_SIZE = 16
-"""Hidden layer size."""
 
 
 class CReLU(nn.Module):
