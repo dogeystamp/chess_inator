@@ -58,12 +58,6 @@ const L1_SCALE: Param = 255;
 /// Quantization scaling factor (params already scaled; we need to dequantize here)
 const OUT_SCALE: Param = 64;
 
-/// Expected size of the weights binary.
-///
-/// - Size of all parameters
-/// - Size of the ARCHITECTURE string (plus ESC byte)
-const BIN_SIZE: usize = std::mem::size_of::<NNUEParameters>() + ARCHITECTURE.len();
-
 /// All weights and biases of the neural network.
 #[derive(Debug)]
 struct NNUEParameters {
@@ -76,19 +70,16 @@ struct NNUEParameters {
 }
 
 /// Parameters, in packed binary form.
-///
-/// This line may have a mismatched type error if the weights are incompatible, either because of
-/// their format, or the version string being different.
-const WEIGHTS_BIN: &[u8; BIN_SIZE] = include_bytes!("weights.bin");
+const WEIGHTS_BIN: &[u8] = include_bytes!("weights.bin");
 
 impl NNUEParameters {
-    const fn from_bytes(bytes: &[u8; BIN_SIZE]) -> Self {
+    const fn from_bytes(bytes: &[u8]) -> Self {
         let mut cursor = ConstCursor::from_bytes(bytes);
         let arch_string: [u8; ARCHITECTURE.len()] = cursor.read_u8();
         let mut i = 0;
         while i < arch_string.len() {
             if arch_string[i] != ARCHITECTURE[i] {
-                panic!("Incompatible weights for this version of the engine.")
+                panic!("The weights file (.bin) has an incompatible version with this engine.")
             }
             i += 1;
         }

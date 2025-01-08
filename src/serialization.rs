@@ -16,9 +16,9 @@ Copyright © 2025 dogeystamp <dogeystamp@disroot.org>
 use std::mem::size_of;
 
 /// Helper to read bytes at compile-time.
-pub(crate) struct ConstCursor<'a, const BUF_SIZE: usize> {
+pub(crate) struct ConstCursor<'a> {
     /// Buffer to read from.
-    buf: &'a [u8; BUF_SIZE],
+    buf: &'a [u8],
     /// Cursor in the buffer where the next byte will be read.
     loc: usize,
 }
@@ -58,15 +58,12 @@ macro_rules! read_type {
     };
 }
 
-impl<'a, const BUF_SIZE: usize> ConstCursor<'a, BUF_SIZE> {
+impl<'a> ConstCursor<'a> {
     /// Fill an array of bytes by reading from the buffer.
     pub const fn read_u8<const N: usize>(&mut self) -> [u8; N] {
         let mut out_buf: [u8; N] = [0; N];
         let mut i = 0;
         while i < N {
-            if i >= BUF_SIZE {
-                break;
-            }
             out_buf[i] = self.buf[self.loc];
             i += 1;
             self.loc += 1;
@@ -80,7 +77,7 @@ impl<'a, const BUF_SIZE: usize> ConstCursor<'a, BUF_SIZE> {
 
     read_type!(crate::nnue::Param, read, read2d);
 
-    pub const fn from_bytes(buf: &'a [u8; BUF_SIZE]) -> Self {
+    pub const fn from_bytes(buf: &'a [u8]) -> Self {
         Self { buf, loc: 0 }
     }
 }
