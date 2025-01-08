@@ -557,7 +557,7 @@ fn iter_deep(board: &mut Board, state: &mut EngineState) -> (Vec<Move>, SearchEv
             },
         );
 
-        if matches!(eval, SearchEval::Stopped | SearchEval::Checkmate(_)) {
+        if matches!(eval, SearchEval::Stopped) {
             return (prev_line, prev_eval);
         } else {
             if let Some(soft_lim) = state.time_lims.soft {
