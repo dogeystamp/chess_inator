@@ -43,15 +43,20 @@ use std::fmt::Display;
 // alias to easily change precision / data type
 pub(crate) type Param = i16;
 
+/// Parameters, in packed binary form.
+const WEIGHTS_BIN: &[u8] = include_bytes!("weights.bin");
+
 /// Network architecture string. Reject any weights file that does not fulfill this.
 const ARCHITECTURE: &[u8] = "A07_CReLU_768_16_1_K_q<i2\x1b".as_bytes();
 
+const HEADER_DATA: NNUEHeader = NNUEHeader::from_bytes(WEIGHTS_BIN);
+
 /// Size of the input feature tensor.
 pub const INP_TENSOR_SIZE: usize = N_COLORS * N_PIECES * N_SQUARES;
-/// Size of the hidden layer.
-const L1_SIZE: usize = 16;
 /// Size of the output layer.
 const OUT_SIZE: usize = 1;
+/// Size of the hidden layer (N).
+const L1_SIZE: usize = HEADER_DATA.l1_size as usize;
 
 /// Quantization scaling factor (params already scaled; we need to dequantize here)
 const L1_SCALE: Param = 255;
@@ -69,17 +74,45 @@ struct NNUEParameters {
     out_b: [Param; OUT_SIZE],
 }
 
-/// Parameters, in packed binary form.
-const WEIGHTS_BIN: &[u8] = include_bytes!("weights.bin");
+/// Version number of the .bin file header.
+const HEADER_VERSION: u8 = 0;
+
+/// Header information from the .bin file.
+struct NNUEHeader {
+    version: u8,
+    l1_size: u16,
+    // remember to change this padding when the above fields change
+    _reserved: [u8; 29],
+}
+
+impl NNUEHeader {
+    const fn from_bytes(bytes: &[u8]) -> Self {
+        let mut cursor = ConstCursor::from_bytes(bytes, 0);
+        let ret = NNUEHeader {
+            version: cursor.read_single_u8(),
+            l1_size: cursor.read_single_u16(),
+            _reserved: cursor.read_u8(),
+        };
+
+        #[allow(clippy::absurd_extreme_comparisons)]
+        if ret.version < HEADER_VERSION || ret.version == b'A' {
+            panic!("The weights .bin file has an outdated version.")
+        } else if ret.version > HEADER_VERSION {
+            panic!("The engine is too outdated to use this weights .bin file.")
+        }
+
+        ret
+    }
+}
 
 impl NNUEParameters {
     const fn from_bytes(bytes: &[u8]) -> Self {
-        let mut cursor = ConstCursor::from_bytes(bytes);
+        let mut cursor = ConstCursor::from_bytes(bytes, std::mem::size_of::<NNUEHeader>());
         let arch_string: [u8; ARCHITECTURE.len()] = cursor.read_u8();
         let mut i = 0;
         while i < arch_string.len() {
             if arch_string[i] != ARCHITECTURE[i] {
-                panic!("The weights file (.bin) has an incompatible version with this engine.")
+                panic!("The weights file (.bin) has an incompatible architecture with this engine.")
             }
             i += 1;
         }

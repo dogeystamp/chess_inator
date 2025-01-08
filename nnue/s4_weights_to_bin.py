@@ -12,10 +12,15 @@
 """
 Convert PyTorch `.pth` weights to `.bin` weights.
 
-This step will also quantize all parameters from double to single precision float.
+This step will also quantize all parameters from double precision float (f64) to half integer (i16).
 
 The `.bin` file format contains the following fields:
 
+- 32 bytes for header information
+    - Byte 0: header version number
+        - For backwards compatibility, avoid using 0x41 / 'A' here
+    - Byte 1-2: number of neurons in hidden layer (u16)
+    - Bytes 3-31: reserved for future use
 - Architecture name (model's shape identifier / version)
 - A single ESC ('0x1b') character to end the architecture name
 - A test value that is the result of passing an all-ones input to the model.
@@ -134,7 +139,14 @@ if __name__ == "__main__":
 
         print(f"\nk is {k}")
 
+        HEADER_VERSION = np.uint8(0)
+        HIDDEN_SIZE = np.ascontiguousarray(np.array(s3nn.HIDDEN_SIZE), "<u2")
+        PADDING = np.ascontiguousarray(np.zeros(29), "<u1")
+
         with open(bin, "wb") as f:
+            f.write(HEADER_VERSION)
+            f.write(HIDDEN_SIZE)
+            f.write(PADDING)
             f.write(arch.encode())
             f.write(b"\x1b")
             f.write(all_ones_res)

@@ -24,18 +24,26 @@ pub(crate) struct ConstCursor<'a> {
 }
 
 macro_rules! read_type {
-    ($type: ty, $fn_name: ident, $fn2_name: ident) => {
+    ($type: ty, $fn0_name: ident, $fn1_name: ident, $fn2_name: ident) => {
+        /// Deserialize a single element from the buffer.
+        #[allow(dead_code)]
+        pub const fn $fn0_name(&mut self) -> $type {
+            const SZ: usize = size_of::<$type>();
+            let elem_buf: [u8; SZ] = self.read_u8::<{ SZ }>();
+            <$type>::from_le_bytes(elem_buf)
+        }
+
         /// Deserialize data from the buffer.
         ///
         /// Returns an array of `N` elements.
-        pub const fn $fn_name<const N: usize>(&mut self) -> [$type; N] {
+        #[allow(dead_code)]
+        pub const fn $fn1_name<const N: usize>(&mut self) -> [$type; N] {
             const SZ: usize = size_of::<$type>();
             let default = <$type>::from_le_bytes([0; SZ]);
             let mut out_buf: [$type; N] = [default; N];
             let mut i = 0;
             while i < N {
-                let elem_buf: [u8; SZ] = self.read_u8::<{ SZ }>();
-                out_buf[i] = <$type>::from_le_bytes(elem_buf);
+                out_buf[i] = self.$fn0_name();
                 i += 1;
             }
             out_buf
@@ -44,13 +52,14 @@ macro_rules! read_type {
         /// Deserialize 2D array of data from the buffer.
         ///
         /// Returns an array of `M` arrays of `N` elements.
+        #[allow(dead_code)]
         pub const fn $fn2_name<const N: usize, const M: usize>(&mut self) -> [[$type; N]; M] {
             const SZ: usize = size_of::<$type>();
             let default = <$type>::from_le_bytes([0; SZ]);
             let mut out_buf: [[$type; N]; M] = [[default; N]; M];
             let mut i = 0;
             while i < M {
-                out_buf[i] = self.$fn_name();
+                out_buf[i] = self.$fn1_name();
                 i += 1;
             }
             out_buf
@@ -64,9 +73,8 @@ impl<'a> ConstCursor<'a> {
         let mut out_buf: [u8; N] = [0; N];
         let mut i = 0;
         while i < N {
-            out_buf[i] = self.buf[self.loc];
+            out_buf[i] = self.read_single_u8();
             i += 1;
-            self.loc += 1;
         }
         if i != N {
             panic!("Could not fill buffer; ran out of bytes to read.");
@@ -75,9 +83,18 @@ impl<'a> ConstCursor<'a> {
         out_buf
     }
 
-    read_type!(crate::nnue::Param, read, read2d);
+    /// Read a single byte from the buffer.
+    pub const fn read_single_u8(&mut self) -> u8 {
+        let ret = self.buf[self.loc];
+        self.loc += 1;
+        ret
+    }
 
-    pub const fn from_bytes(buf: &'a [u8]) -> Self {
-        Self { buf, loc: 0 }
+    read_type!(crate::nnue::Param, read_single, read, read2d);
+    read_type!(u16, read_single_u16, read_u16, read2d_u16);
+
+    /// Initialize a cursor over a buffer, starting the cursor at the index `whence`.
+    pub const fn from_bytes(buf: &'a [u8], whence: usize) -> Self {
+        Self { buf, loc: whence }
     }
 }
