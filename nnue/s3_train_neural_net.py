@@ -278,9 +278,9 @@ class NNUE(nn.Module):
                     torch.tensor(
                         [
                             [
-                                [m * pc_val / np.double(10) for _ in range(64)]
+                                [m * pc_val / np.double(10) + torch.rand(1) * 0.001 for _ in range(64)]
                                 if i == pc_idx
-                                else [0.0001 for _ in range(64)]
+                                else [0.001 * torch.rand(1) for _ in range(64)]
                                 for i, pc_val in enumerate((5, 3, 3, 0.001, 9, 1))
                             ]
                             for m in sign
@@ -290,32 +290,26 @@ class NNUE(nn.Module):
                     )
                 )
 
-            # by default have blank slate in output layer
-            out_params[0].data = torch.tensor(
-                [[0.0001 for i in range(HIDDEN_SIZE)]],
-                dtype=torch.double,
-                device=device,
-            )
-            out_params[1].data = torch.tensor(
-                [0.0001], dtype=torch.double, device=device
-            )
+            # by default the output layer shouldn't have big parameters
+            out_params[0].data *= 0.001
+            out_params[1].data *= 0.001
 
             # white pieces
             for i in range(6):
-                l1_params[0].data[i] = pc_value((1.0, 0.0001), i)
-                # weight assumes k = 500. should be 1000 / k.
+                l1_params[0].data[i] = pc_value((1.0, 0.001), i)
+                # weight assumes k = 400. should be 1000 / k.
                 out_params[0].data[0][i] = torch.tensor(
-                    2.0, dtype=torch.double, device=device
+                    2.5, dtype=torch.double, device=device
                 )
             # black pieces
             for i in range(6):
-                l1_params[0].data[i + 6] = pc_value((0.0001, 1.0), i)
+                l1_params[0].data[i + 6] = pc_value((0.001, 1.0), i)
                 out_params[0].data[0][i + 6] = torch.tensor(
-                    -2.0, dtype=torch.double, device=device
+                    -2.5, dtype=torch.double, device=device
                 )
             # bias
             for i in range(12):
-                l1_params[1].data[i] = torch.tensor(0.001, device=device)
+                l1_params[1].data[i] = torch.randn(1, device=device) * 0.001
 
         self.linear_relu_stack = nn.Sequential(l1, CReLU(), out)
 
