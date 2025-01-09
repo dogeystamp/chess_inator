@@ -30,7 +30,7 @@ pub enum UCIMode {
 /// State machine transitions.
 #[derive(Clone, Copy, Debug)]
 pub enum UCIModeTransition {
-    /// Engine produces a best move result. Thinking to Idle.
+    /// Engine produces a best move result. Thinking/Ponder to Idle.
     Bestmove,
     /// Engine is stopped via a UCI `stop` command. Thinking/Ponder to Idle.
     Stop,
@@ -38,11 +38,9 @@ pub enum UCIModeTransition {
     Go,
     /// Engine starts pondering on the opponent's time. Idle -> Ponder.
     GoPonder,
-    /// While engine ponders, the opponent plays a different move than expected. Ponder -> Thinking
-    ///
-    /// In UCI, this means that a new `position` command is sent.
-    PonderMiss,
     /// While engine ponders, the opponent plays the expected move (`ponderhit`). Ponder -> Thinking
+    ///
+    /// Note that a ponder miss is given as a `stop` then new `position`.
     PonderHit,
 }
 
@@ -56,7 +54,6 @@ impl UCIModeTransition {
             Stop => Idle,
             Go => Think,
             GoPonder => Ponder,
-            PonderMiss => Think,
             PonderHit => Think,
         }
     }
@@ -106,7 +103,7 @@ impl UCIModeMachine {
 
         match t {
             Bestmove => match self.mode {
-                UCIMode::Think => legal!(),
+                UCIMode::Think | UCIMode::Ponder => legal!(),
                 _ => illegal!(),
             },
             Stop => match self.mode {
@@ -115,10 +112,6 @@ impl UCIModeMachine {
             },
             Go | GoPonder => match self.mode {
                 UCIMode::Idle => legal!(),
-                _ => illegal!(),
-            },
-            PonderMiss => match self.mode {
-                UCIMode::Ponder => legal!(),
                 _ => illegal!(),
             },
             PonderHit => match self.mode {
@@ -160,6 +153,7 @@ mod test_state_machine {
 }
 
 /// Message (engine->main) to communicate the best move.
+#[derive(Clone, Debug)]
 pub struct MsgBestmove {
     /// Best line (reversed stack; last element is best current move)
     pub pv: Vec<Move>,
@@ -170,6 +164,7 @@ pub struct MsgBestmove {
 }
 
 /// Interface messages that may be received by main's channel.
+#[derive(Clone, Debug)]
 pub enum MsgToMain {
     StdinLine(String),
     Bestmove(MsgBestmove),

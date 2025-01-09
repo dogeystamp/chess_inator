@@ -35,8 +35,10 @@ Copyright © 2024 dogeystamp <dogeystamp@disroot.org>
 
 use chess_inator::prelude::*;
 use std::io;
+use std::ops::Not;
 use std::process::exit;
 use std::sync::mpsc::{channel, Receiver, Sender};
+use std::collections::VecDeque;
 use std::thread;
 
 /// UCI protocol says to ignore any unknown words.
@@ -53,6 +55,7 @@ fn cmd_uci() -> String {
     let str = "id name chess_inator\n\
                id author dogeystamp\n\
                option name NNUETrainInfo type check default false\n\
+               option name Ponder type check default false\n\
                option name Hash type spin default 16 min 1 max 6200\n\
                uciok";
     str.into()
@@ -117,6 +120,8 @@ fn cmd_go(mut tokens: std::str::SplitWhitespace<'_>, state: &mut MainState) {
     let mut btime: Option<u64> = None;
     let mut movetime: Option<u64> = None;
 
+    let mut ponder = false;
+
     macro_rules! set_time {
         ($var: ident) => {
             if let Some(time) = tokens.next() {
@@ -136,9 +141,33 @@ fn cmd_go(mut tokens: std::str::SplitWhitespace<'_>, state: &mut MainState) {
             "movetime" => {
                 set_time!(movetime)
             }
+            "ponder" => {
+                ponder = true;
+            }
             _ => ignore!(),
         }
     }
+
+    // attempt to transition state, and if it's not allowed then ignore the command
+    if ponder {
+        if state
+            .uci_mode
+            .transition(UCIModeTransition::GoPonder)
+            .is_ok()
+            .not()
+        {
+            return;
+        }
+    } else if state
+        .uci_mode
+        .transition(UCIModeTransition::Go)
+        .is_ok()
+        .not()
+    {
+        return;
+    }
+
+    state.config.pondering = ponder;
 
     let (ourtime_ms, theirtime_ms) = if state.board.get_turn() == Color::White {
         (wtime, btime)
@@ -209,6 +238,13 @@ fn cmd_setoption(mut tokens: std::str::SplitWhitespace<'_>, state: &mut MainStat
                                 }
                             }
                         }
+                        "Ponder" => {
+                            if let Some(value) = get_val(tokens) {
+                                if let Some(value) = match_true_false(&value) {
+                                    state.config.pondering_enabled = value;
+                                }
+                            }
+                        }
                         "Hash" => {
                             if let Some(value) = get_val(tokens) {
                                 if let Ok(value) = value.parse::<usize>() {
@@ -255,16 +291,34 @@ fn cmd_root(mut tokens: std::str::SplitWhitespace<'_>, state: &mut MainState) {
             "position" => {
                 if matches!(state.uci_mode.mode, UCIMode::Idle) {
                     cmd_position(tokens, state);
+                } else {
+                    eprintln!("err: Can't set position in state {:?}", state.uci_mode.mode)
                 }
             }
             "go" => {
-                if state.uci_mode.transition(UCIModeTransition::Go).is_ok() {
-                    cmd_go(tokens, state);
+                // uci mode transition done inside the command handler, since ponder/go are
+                // different
+                cmd_go(tokens, state);
+            }
+            "ponderhit" => {
+                if state
+                    .uci_mode
+                    .transition(UCIModeTransition::PonderHit)
+                    .is_ok()
+                {
+                    state.config.pondering = false;
+                    state
+                        .tx_engine
+                        .send(MsgToEngine::Configure(state.config))
+                        .unwrap();
+                } else {
+                    eprintln!("err: Can't ponderhit in state {:?}", state.uci_mode.mode)
                 }
             }
             "stop" => {
-                // actually setting state to stop happens when bestmove is received
                 if matches!(state.uci_mode.mode, UCIMode::Think | UCIMode::Ponder) {
+                    // disable uci commands until we receive a bestmove
+                    state.accept_uci_input = false;
                     state.tx_engine.send(MsgToEngine::Stop).unwrap();
                 }
             }
@@ -284,7 +338,6 @@ fn cmd_root(mut tokens: std::str::SplitWhitespace<'_>, state: &mut MainState) {
 
 /// Format a bestmove.
 fn outp_bestmove(bestmove: MsgBestmove) {
-    let chosen = bestmove.pv.last().copied();
     println!(
         "info pv{}",
         bestmove
@@ -307,10 +360,17 @@ fn outp_bestmove(bestmove: MsgBestmove) {
         println!("info string {line}");
     }
 
+    let mut pv_in_order = bestmove.pv.iter().rev();
+    let (chosen, ponder_mv) = (pv_in_order.next(), pv_in_order.next());
     match chosen {
-        Some(mv) => println!("bestmove {}", mv.to_uci_algebraic()),
-        None => println!("bestmove 0000"),
+        Some(mv) => print!("bestmove {}", mv.to_uci_algebraic()),
+        None => print!("bestmove 0000"),
     }
+
+    if let Some(mv) = ponder_mv {
+        print!(" ponder {}", mv.to_uci_algebraic())
+    }
+    println!();
 }
 
 /// The "Stdin" thread to read stdin while avoiding blocking
@@ -390,6 +450,11 @@ struct MainState {
     config: SearchConfig,
     /// UCI mode state machine
     uci_mode: UCIModeMachine,
+    /// When false, holds commands in a queue until the engine is ready.
+    ///
+    /// This is useful to allow the Main thread to await an Engine response before listening to
+    /// commands from the Stdin thread.
+    accept_uci_input: bool,
 }
 
 impl MainState {
@@ -406,6 +471,7 @@ impl MainState {
             board,
             config,
             uci_mode,
+            accept_uci_input: true,
         }
     }
 }
@@ -426,12 +492,25 @@ fn main() {
         UCIModeMachine::default(),
     );
 
+    // stdin queue, that we hold messages in
+    let mut uci_cmd_queue = VecDeque::<String>::new();
+
     loop {
-        let msg = state.rx_main.recv().unwrap();
+        let msg = if !state.accept_uci_input || uci_cmd_queue.is_empty() {
+            // listen for a new message
+            state.rx_main.recv().unwrap()
+        } else {
+            // process our backlog of commands
+            MsgToMain::StdinLine(uci_cmd_queue.pop_front().unwrap())
+        };
         match msg {
             MsgToMain::StdinLine(line) => {
-                let tokens = line.split_whitespace();
-                cmd_root(tokens, &mut state);
+                if state.accept_uci_input {
+                    let tokens = line.split_whitespace();
+                    cmd_root(tokens, &mut state);
+                } else {
+                    uci_cmd_queue.push_back(line);
+                }
             }
             MsgToMain::Bestmove(msg_bestmove) => {
                 state
@@ -439,6 +518,7 @@ fn main() {
                     .transition(UCIModeTransition::Bestmove)
                     .unwrap();
                 outp_bestmove(msg_bestmove);
+                state.accept_uci_input = true;
             }
         }
     }

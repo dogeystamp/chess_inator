@@ -113,6 +113,19 @@ pub struct SearchConfig {
     /// Limit quiescence search depth
     pub qdepth: usize,
 
+    /// Tells the engine to never stop thinking, because it is currently pondering.
+    ///
+    /// Not to be confused with `pondering_enabled`, which tells the engine that it may ponder,
+    /// sooner or later in this game.
+    pub pondering: bool,
+
+    /// A hint to the engine that it will ponder in this game, so that it may adjust its time
+    /// management.
+    ///
+    /// Not to be confused with `pondering`, which means the engine is doing the action of
+    /// pondering.
+    pub pondering_enabled: bool,
+
     /// Parameter (centipawns) that sets how confident the engine is.
     ///
     /// Positive means avoid draws, and try to win instead.
@@ -138,6 +151,8 @@ impl Default for SearchConfig {
             enable_trans_table: true,
             transposition_size: 16,
             nnue_train_info: false,
+            pondering: false,
+            pondering_enabled: false,
         }
     }
 }
@@ -204,11 +219,11 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Vec<M
 
     if let Some(interrupt_cycle) = interrupt_cycle {
         if state.node_count % (interrupt_cycle) == 0 {
-            // respect the hard stop if given
             match state.rx_engine.try_recv() {
                 Ok(msg) => match msg {
                     MsgToEngine::Go(_) => panic!("received go while thinking"),
                     MsgToEngine::Configure(cfg) => state.config = cfg,
+                    // respect the hard stop if given
                     MsgToEngine::Stop => {
                         return (Vec::new(), SearchEval::Stopped);
                     }
@@ -220,9 +235,11 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Vec<M
                 },
             }
 
-            if let Some(hard) = state.time_lims.hard {
-                if Instant::now() > hard {
-                    return (Vec::new(), SearchEval::Stopped);
+            if !state.config.pondering {
+                if let Some(hard) = state.time_lims.hard {
+                    if Instant::now() > hard {
+                        return (Vec::new(), SearchEval::Stopped);
+                    }
                 }
             }
         }
@@ -545,7 +562,14 @@ fn iter_deep(board: &mut Board, state: &mut EngineState) -> (Vec<Move>, SearchEv
 
     state.interrupts = InterruptMode::Normal;
 
-    for depth in 2..=state.config.depth {
+    let max_depth = if state.config.pondering {
+        // i'm just going to hope it doesn't reach this depth
+        240
+    } else {
+        state.config.depth
+    };
+
+    for depth in 2..=max_depth {
         let (line, eval) = minmax(
             board,
             state,
@@ -560,9 +584,11 @@ fn iter_deep(board: &mut Board, state: &mut EngineState) -> (Vec<Move>, SearchEv
         if matches!(eval, SearchEval::Stopped) {
             return (prev_line, prev_eval);
         } else {
-            if let Some(soft_lim) = state.time_lims.soft {
-                if Instant::now() > soft_lim {
-                    return (line, eval);
+            if !state.config.pondering {
+                if let Some(soft_lim) = state.time_lims.soft {
+                    if Instant::now() > soft_lim {
+                        return (line, eval);
+                    }
                 }
             }
             (prev_line, prev_eval) = (line, eval);
