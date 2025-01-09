@@ -61,13 +61,13 @@ EPOCHS = 20
 
 # neural net architecture
 
-HIDDEN_SIZE = 16
+HIDDEN_SIZE = 32
 """Hidden layer size."""
 
 INPUT_SIZE = 2 * 6 * 64  # 768
 """Board feature input size."""
 
-ARCHITECTURE = f"A07_CReLU_{INPUT_SIZE}_{HIDDEN_SIZE}_1_K"
+ARCHITECTURE = f"A07_CReLU_{INPUT_SIZE}_N_1_K"
 """Unique ID / version for this architecture."""
 
 ################################

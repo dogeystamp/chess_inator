@@ -47,7 +47,7 @@ pub(crate) type Param = i16;
 const WEIGHTS_BIN: &[u8] = include_bytes!("weights.bin");
 
 /// Network architecture string. Reject any weights file that does not fulfill this.
-const ARCHITECTURE: &[u8] = "A07_CReLU_768_16_1_K_q<i2\x1b".as_bytes();
+const ARCHITECTURE: &[u8] = "A07_CReLU_768_N_1_K_q<i2\x1b".as_bytes();
 
 const HEADER_DATA: NNUEHeader = NNUEHeader::from_bytes(WEIGHTS_BIN);
 
