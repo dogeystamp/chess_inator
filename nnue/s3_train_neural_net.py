@@ -120,7 +120,14 @@ class StrToTensor(nn.Module):
     def forward(self, x: str):
         arr = np.frombuffer(bytearray(x, "utf-8"), np.int8) - ord("0")
         arr.setflags(write=True)
-        return torch.from_numpy(arr).to(device=device)
+        return torch.from_numpy(arr)
+
+
+class MvToDevice(nn.Module):
+    """Moves a tensor to the GPU (or whatever device training is done on)."""
+
+    def forward(self, x: torch.Tensor):
+        return x.to(device=device)
 
 
 str_to_tensor = StrToTensor()
@@ -139,6 +146,11 @@ class ChessPositionDataset(Dataset):
         tqdm.pandas(desc="STRING PARSING")
         self.data["board_features"] = self.data["board_features"].progress_apply(
             str_to_tensor
+        )
+
+        tqdm.pandas(desc="SENDING TO DEVICE")
+        self.data["board_features"] = self.data["board_features"].progress_apply(
+            MvToDevice()
         )
 
         # tune sigmoid
