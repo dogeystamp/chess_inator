@@ -107,6 +107,11 @@ parser.add_argument(
     default=Path(f"weights_{ARCHITECTURE_SPECIFIC}.pth"),
 )
 parser.add_argument(
+    "--force-load",
+    action="store_true",
+    help="Load models even if their architecture information is incompatible.",
+)
+parser.add_argument(
     "--log",
     type=Path,
     help="Path to log (as .csv) the results of the loss function.",
@@ -519,14 +524,26 @@ def load_model(
     checkpoint = torch.load(load_path, weights_only=True, map_location=device)
     if arch := checkpoint.get("arch"):
         if arch != model.arch:
-            raise ValueError(
-                f"Tried to load from arch '{arch}', but was expecting '{model.arch}'. There is a version mismatch."
-            )
+            if args.force_load:
+                logging.warning(
+                    "Force-loading arch '%s', but was expecting '%s'.", arch, model.arch
+                )
+            else:
+                raise ValueError(
+                    f"Tried to load from arch '{arch}', but was expecting '{model.arch}'. There is a version mismatch."
+                )
     if arch_s := checkpoint.get("arch_specific"):
         if arch_s != model.arch_specific:
-            raise ValueError(
-                f"Tried to load from specific arch '{arch_s}', but was expecting '{model.arch_specific}'. There is a version mismatch."
-            )
+            if args.force_load:
+                logging.warning(
+                    "Force-loading specific arch '%s', but was expecting '%s'.",
+                    arch_s,
+                    model.arch_specific,
+                )
+            else:
+                raise ValueError(
+                    f"Tried to load from specific arch '{arch_s}', but was expecting '{model.arch_specific}'. There is a version mismatch."
+                )
     model.load_state_dict(checkpoint["model_state_dict"])
     model.k = model.k or checkpoint["k"].detach().numpy().item()
     if not model.k:
