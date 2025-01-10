@@ -47,7 +47,17 @@ pub(crate) type Param = i16;
 const WEIGHTS_BIN: &[u8] = include_bytes!("weights.bin");
 
 /// Network architecture string. Reject any weights file that does not fulfill this.
-const ARCHITECTURE: &[u8] = "A07_CReLU_768_N_1_K_q<i2\x1b".as_bytes();
+///
+/// - Axx: serial number
+/// - CReLU: activation function
+/// - 768: input size
+/// - N: hidden layer size (variable)
+/// - 1: output layer size
+/// - K: includes sigmoid K parameter
+/// - Q: quantized
+/// - T: transposed
+/// - <i2: quantized to little endian integer, 2 byte
+const ARCHITECTURE: &[u8] = "A07_CReLU_768_N_1_KQT<i2\x1b".as_bytes();
 
 const HEADER_DATA: NNUEHeader = NNUEHeader::from_bytes(WEIGHTS_BIN);
 
@@ -68,7 +78,7 @@ const OUT_SCALE: Param = 64;
 struct NNUEParameters {
     _sanity_check: [Param; 1],
     k: [Param; 1],
-    l1_w: [[Param; INP_TENSOR_SIZE]; L1_SIZE],
+    l1_w: [[Param; L1_SIZE]; INP_TENSOR_SIZE],
     l1_b: [Param; L1_SIZE],
     out_w: [[Param; L1_SIZE]; OUT_SIZE],
     out_b: [Param; OUT_SIZE],
@@ -193,11 +203,13 @@ impl Nnue {
     /// Turn on/off a bit in the input tensor.
     pub fn bit_set(&mut self, i: usize, on: bool) {
         debug_assert!(i < INP_TENSOR_SIZE);
-        for j in 0..L1_SIZE {
-            if on {
-                self.l1[j] += WEIGHTS.l1_w[j][i];
-            } else {
-                self.l1[j] -= WEIGHTS.l1_w[j][i];
+        if on {
+            for j in 0..L1_SIZE {
+                self.l1[j] += WEIGHTS.l1_w[i][j];
+            }
+        } else {
+            for j in 0..L1_SIZE {
+                self.l1[j] -= WEIGHTS.l1_w[i][j];
             }
         }
     }

@@ -110,9 +110,9 @@ if __name__ == "__main__":
         # hidden layer size
         l1_size = min(model.l1_size, 0xffff)
 
-        arch_specific: str = (model.arch_specific or arch) + "_q" + dtype
+        arch_specific: str = (model.arch_specific or arch) + "QT" + dtype
 
-        arch += "_q" + dtype
+        arch += "QT" + dtype
 
         bin = args.output or args.pth.with_suffix(".bin")
 
@@ -157,6 +157,8 @@ if __name__ == "__main__":
             f.write(k)
             params = list(model.parameters())
             params[0].data *= SCALE_L1
+            # transpose l1 weights for efficiency
+            params[0].data = torch.transpose(params[0].data, 0, 1)
             params[1].data *= SCALE_L1
             params[2].data *= SCALE_OUT
             params[3].data *= SCALE_OUT
