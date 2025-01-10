@@ -74,7 +74,7 @@ Unique ID / version for this architecture.
 This serves as a compatibility indicator for the Rust engine code.
 """
 
-ARCHITECTURE_SPECIFIC = f"A07_CReLU_{INPUT_SIZE}_{INPUT_SIZE}_1_K"
+ARCHITECTURE_SPECIFIC = f"A07_CReLU_{INPUT_SIZE}_{HIDDEN_SIZE}_1_K"
 """
 Architecture string, including specifics like the hidden layer size.
 
