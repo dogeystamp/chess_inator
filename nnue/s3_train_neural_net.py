@@ -61,7 +61,7 @@ EPOCHS = 20
 
 # neural net architecture
 
-HIDDEN_SIZE = 16
+HIDDEN_SIZE = 256
 """Hidden layer size."""
 
 INPUT_SIZE = 2 * 6 * 64  # 768
@@ -524,7 +524,7 @@ def load_model(
     checkpoint = torch.load(load_path, weights_only=True, map_location=device)
     if arch := checkpoint.get("arch"):
         if arch != model.arch:
-            if args.force_load:
+            if "args" in globals() and args.force_load:
                 logging.warning(
                     "Force-loading arch '%s', but was expecting '%s'.", arch, model.arch
                 )
@@ -534,7 +534,7 @@ def load_model(
                 )
     if arch_s := checkpoint.get("arch_specific"):
         if arch_s != model.arch_specific:
-            if args.force_load:
+            if "args" in globals() and args.force_load:
                 logging.warning(
                     "Force-loading specific arch '%s', but was expecting '%s'.",
                     arch_s,
