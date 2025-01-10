@@ -61,14 +61,25 @@ EPOCHS = 20
 
 # neural net architecture
 
-HIDDEN_SIZE = 32
+HIDDEN_SIZE = 16
 """Hidden layer size."""
 
 INPUT_SIZE = 2 * 6 * 64  # 768
 """Board feature input size."""
 
 ARCHITECTURE = f"A07_CReLU_{INPUT_SIZE}_N_1_K"
-"""Unique ID / version for this architecture."""
+"""
+Unique ID / version for this architecture.
+
+This serves as a compatibility indicator for the Rust engine code.
+"""
+
+ARCHITECTURE_SPECIFIC = f"A07_CReLU_{INPUT_SIZE}_{INPUT_SIZE}_1_K"
+"""
+Architecture string, including specifics like the hidden layer size.
+
+This helps the Python training code determine compatibility of weight files.
+"""
 
 ################################
 ################################
@@ -87,13 +98,13 @@ parser.add_argument(
     "--save",
     type=Path,
     help="Path to save trained model to.",
-    default=Path(f"weights_{ARCHITECTURE}.pth"),
+    default=Path(f"weights_{ARCHITECTURE_SPECIFIC}.pth"),
 )
 parser.add_argument(
     "--load",
     type=Path,
     help="Path to load trained model from.",
-    default=Path(f"weights_{ARCHITECTURE}.pth"),
+    default=Path(f"weights_{ARCHITECTURE_SPECIFIC}.pth"),
 )
 parser.add_argument(
     "--log",
@@ -264,6 +275,8 @@ class NNUE(nn.Module):
         super().__init__()
         self.k: np.double | None = None
         self.arch = ARCHITECTURE
+        self.arch_specific = ARCHITECTURE_SPECIFIC
+        self.l1_size = HIDDEN_SIZE
 
         with torch.no_grad():
             # initialize model to a simple piece value evaluation
@@ -278,7 +291,10 @@ class NNUE(nn.Module):
                     torch.tensor(
                         [
                             [
-                                [m * pc_val / np.double(10) + torch.rand(1) * 0.001 for _ in range(64)]
+                                [
+                                    m * pc_val / np.double(10) + torch.rand(1) * 0.001
+                                    for _ in range(64)
+                                ]
                                 if i == pc_idx
                                 else [0.001 * torch.rand(1) for _ in range(64)]
                                 for i, pc_val in enumerate((5, 3, 3, 0.001, 9, 1))
@@ -506,6 +522,11 @@ def load_model(
             raise ValueError(
                 f"Tried to load from arch '{arch}', but was expecting '{model.arch}'. There is a version mismatch."
             )
+    if arch_s := checkpoint.get("arch_specific"):
+        if arch_s != model.arch_specific:
+            raise ValueError(
+                f"Tried to load from specific arch '{arch_s}', but was expecting '{model.arch_specific}'. There is a version mismatch."
+            )
     model.load_state_dict(checkpoint["model_state_dict"])
     model.k = model.k or checkpoint["k"].detach().numpy().item()
     if not model.k:
@@ -513,6 +534,7 @@ def load_model(
     if optimizer:
         if state := checkpoint["optimizer_state_dict"]:
             optimizer.load_state_dict(state)
+    model.l1_size = checkpoint.get("l1_size") or model.l1_size
     return checkpoint.get("epoch")
 
 
@@ -533,6 +555,8 @@ def save_model(
             epoch=epoch,
             k=torch.as_tensor(model.k),
             arch=model.arch,
+            arch_specific=model.arch_specific,
+            l1_size=HIDDEN_SIZE,
         ),
         save_path,
     )

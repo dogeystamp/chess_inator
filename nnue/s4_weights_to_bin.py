@@ -107,6 +107,11 @@ if __name__ == "__main__":
 
         arch: str = model.arch
 
+        # hidden layer size
+        l1_size = min(model.l1_size, 0xffff)
+
+        arch_specific: str = (model.arch_specific or arch) + "_q" + dtype
+
         arch += "_q" + dtype
 
         bin = args.output or args.pth.with_suffix(".bin")
@@ -117,13 +122,12 @@ if __name__ == "__main__":
 
         all_ones_res = np.double(
             (
-                model.linear_relu_stack(
-                    torch.ones([s3nn.INPUT_SIZE], dtype=torch.double)
-                ) * model.k
+                model.linear_relu_stack(torch.ones([s3nn.INPUT_SIZE], dtype=torch.double))
+                * model.k
             ).item()
         ).astype(dtype, casting="unsafe")
 
-        print(f"writing architecture {arch}")
+        print(f"writing architecture {arch_specific}")
         print(f"sanity check value: {all_ones_res}")
         print(
             "running the model with an all ones input should give you the above centipawn (logit) value."
@@ -140,12 +144,12 @@ if __name__ == "__main__":
         print(f"\nk is {k}")
 
         HEADER_VERSION = np.uint8(0)
-        HIDDEN_SIZE = np.ascontiguousarray(np.array(s3nn.HIDDEN_SIZE), "<u2")
+        hidden_size = np.ascontiguousarray(np.array(l1_size), "<u2")
         PADDING = np.ascontiguousarray(np.zeros(29), "<u1")
 
         with open(bin, "wb") as f:
             f.write(HEADER_VERSION)
-            f.write(HIDDEN_SIZE)
+            f.write(hidden_size)
             f.write(PADDING)
             f.write(arch.encode())
             f.write(b"\x1b")
