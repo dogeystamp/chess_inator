@@ -61,7 +61,7 @@ EPOCHS = 20
 
 # neural net architecture
 
-HIDDEN_SIZE = 256
+HIDDEN_SIZE = 192
 """Hidden layer size."""
 
 INPUT_SIZE = 2 * 6 * 64  # 768
