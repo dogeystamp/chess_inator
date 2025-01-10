@@ -138,6 +138,7 @@ impl NNUEParameters {
     }
 }
 
+#[allow(long_running_const_eval)]
 const WEIGHTS: NNUEParameters = NNUEParameters::from_bytes(WEIGHTS_BIN);
 
 #[derive(Debug, PartialEq, Eq)]
