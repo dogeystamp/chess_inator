@@ -34,11 +34,11 @@ Copyright © 2024 dogeystamp <dogeystamp@disroot.org>
 //!   "receive at Main" respectively. These names would be used for one channel.
 
 use chess_inator::prelude::*;
+use std::collections::VecDeque;
 use std::io;
 use std::ops::Not;
 use std::process::exit;
 use std::sync::mpsc::{channel, Receiver, Sender};
-use std::collections::VecDeque;
 use std::thread;
 
 /// UCI protocol says to ignore any unknown words.
