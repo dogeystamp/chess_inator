@@ -87,8 +87,9 @@ technical details about the training pipeline.
 - **Generation 2:** (tag `nnue2`) is neural-network based, and is trained on
   positions from the [Lichess elite database](https://database.nikonoel.fr/),
   October 2024. These positions were scored using gen 1's evaluation.
-- **Generation 3:** is trained on Lichess elite database positions
-  (September 2024), scored by gen 2's evaluation.
+- **Generation 3:** (tag `nnue3-192`) increases the hidden layer size from 16
+  to 192 neurons. It is trained on Lichess elite database positions (September
+  2024), scored by gen 2's evaluation.
 
 ## development instructions
 
