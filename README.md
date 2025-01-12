@@ -2,11 +2,11 @@
 
 A chess engine built from scratch, powered by a neural network.
 
-By learning from chess games played by masters, chess-inator improves in
-strength without external intervention. Notably, chess-inator **has no help from
-existing engines**, like Stockfish. It **learns entirely by itself**.
+This engine is trained on master level games from Lichess. Notably,
+chess-inator does not use analysis from existing engines like Stockfish; it
+learns entirely on its own, scoring positions with prior versions of itself.
 
-The engine is trained with minimal pre-existing knowledge of chess.
+The engine is trained with little pre-existing knowledge of chess.
 Specifically, chess-inator started off knowing:
 
 - The rules of chess
@@ -24,6 +24,7 @@ described in the "development instructions" section.
 These are some technical details about the features implemented in the engine.
 
 - Mailbox and redundant bitboard representation
+    - Naive pseudo-legal move generation
 - Make/unmake
 - Negamax search
 - Alpha-beta pruning
@@ -45,9 +46,9 @@ the following:
 
 - "ALL" input feature, multi-hot tensor (768 neurons)
     - Each combination of piece (6), color (2), and square (64) has a neuron.
-    - Clipped ReLU activation (i.e. clamp between 0, 1)
 - Hidden layer / accumulator (N neurons)
     - This layer is fully connected to the last.
+    - Clipped ReLU activation (i.e. clamp between 0, 1)
 - Output neuron (1 neuron)
     - Sigmoid to get a "WDL space" evaluation (0 is a black win, 1 is a white win, 0.5 is a draw).
     - A scaling factor is applied so that the logits (raw values before the
@@ -59,10 +60,8 @@ unmade can incrementally update these values (i.e. we don't have to do a
 complete forward pass for every move).
 
 For efficiency reasons, the network is also quantized to `int16` after
-training. This provides a considerable speed-up compared to `float32`, and
-especially `float64` architectures. Also, since moves are made and then unmade
-often by the engine, floating point might accumulate errors after repeated
-updates.
+training. This provides a considerable speed-up compared to `float64`, which is
+used during training.
 
 ## training process / history
 
