@@ -118,6 +118,7 @@ fn cmd_position(mut tokens: std::str::SplitWhitespace<'_>, state: &mut MainState
 fn cmd_go(mut tokens: std::str::SplitWhitespace<'_>, state: &mut MainState) {
     let mut wtime: Option<u64> = None;
     let mut btime: Option<u64> = None;
+    let mut override_depth: Option<usize> = None;
     let mut movetime: Option<u64> = None;
 
     let mut ponder = false;
@@ -140,6 +141,11 @@ fn cmd_go(mut tokens: std::str::SplitWhitespace<'_>, state: &mut MainState) {
             }
             "movetime" => {
                 set_time!(movetime)
+            }
+            "depth" => {
+                if let Some(depth) = tokens.next() {
+                    override_depth = depth.parse::<usize>().ok();
+                }
             }
             "ponder" => {
                 ponder = true;
@@ -165,6 +171,11 @@ fn cmd_go(mut tokens: std::str::SplitWhitespace<'_>, state: &mut MainState) {
         .not()
     {
         return;
+    }
+
+    let saved_depth = state.config.depth;
+    if let Some(depth) = override_depth {
+        state.config.depth = depth;
     }
 
     state.config.pondering = ponder;
@@ -196,6 +207,8 @@ fn cmd_go(mut tokens: std::str::SplitWhitespace<'_>, state: &mut MainState) {
             time_lims,
         })))
         .unwrap();
+
+    state.config.depth = saved_depth;
 }
 
 /// Print static evaluation of the position.
