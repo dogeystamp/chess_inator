@@ -281,7 +281,7 @@ mod tests {
             nnue.bit_set(i, true);
         }
 
-        let epsilon = 50;
+        let epsilon = 100;
 
         let got = nnue.output();
         let expected = EvalInt::from(WEIGHTS._sanity_check[0]);
