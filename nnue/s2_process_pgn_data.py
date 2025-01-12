@@ -64,6 +64,13 @@ parser.add_argument(
     type=Path,
 )
 parser.add_argument(
+    "-o",
+    "--output",
+    help="Output folder.",
+    type=Path,
+    default=Path("train_data")
+)
+parser.add_argument(
     "--max-workers",
     help="Max concurrent workers to analyse games with (limit this to your hardware thread count).",
     default=min(4, multiprocessing.cpu_count()),
@@ -79,6 +86,12 @@ parser.add_argument(
     type=float,
     help="Duration limit in seconds for each ply to be analyzed.",
     default=0.3,
+)
+parser.add_argument(
+    "--depth-limit",
+    type=int,
+    help="Main depth limit in plies for analysis. Does not include quiescence depth.",
+    default=2,
 )
 parser.add_argument("files", nargs="+", type=Path)
 args = parser.parse_args()
@@ -153,7 +166,7 @@ async def worker(game_generator: AsyncIterator[pgn.Game]) -> None:
                 continue
             result = await engine.play(
                 board,
-                chess.engine.Limit(time=args.time_limit),
+                chess.engine.Limit(time=args.time_limit, depth=args.depth_limit),
                 info=chess.engine.INFO_ALL,
                 game=game,
             )
@@ -217,7 +230,7 @@ async def status_logger():
 async def main():
     status_task = create_task(status_logger())
 
-    outp_dir = Path("train_data")
+    outp_dir = args.output
     outp_dir.mkdir(exist_ok=True)
 
     any_file = False
