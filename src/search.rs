@@ -15,13 +15,13 @@ Copyright © 2024 dogeystamp <dogeystamp@disroot.org>
 
 use crate::hash::ZobristTable;
 use crate::prelude::*;
-use std::cmp::{max, min};
+use std::cmp::min;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-// min can't be represented as positive
-const EVAL_WORST: EvalInt = -(EvalInt::MAX);
-const EVAL_BEST: EvalInt = EvalInt::MAX;
+// a bit less than int max, as a safety margin
+const EVAL_BEST: EvalInt = EvalInt::MAX - 3;
+const EVAL_WORST: EvalInt = -(EVAL_BEST);
 
 #[cfg(test)]
 mod test_eval_int {
@@ -176,12 +176,22 @@ fn move_priority(board: &mut Board, mv: &Move, state: &mut EngineState) -> EvalI
         }
     } else if let Some(cap_pc) = anti_mv.cap {
         // least valuable victim, most valuable attacker
-        eval += lvv_mva_eval(src_pc.into(), cap_pc)
+        // penalized to prioritize transposition table moves
+        eval += lvv_mva_eval(src_pc.into(), cap_pc) - 1000
     }
 
     anti_mv.unmake(board);
 
     eval
+}
+
+/// PVS search node type
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum NodeType {
+    /// Node is part of the main line (principal variation)
+    PV,
+    /// Node is outside the main line
+    NonPV,
 }
 
 /// State specifically for a minmax call.
@@ -194,6 +204,8 @@ struct MinmaxState {
     beta: Option<EvalInt>,
     /// quiescence search flag
     quiesce: bool,
+
+    node_type: NodeType,
 }
 
 /// Search the game tree to find the absolute (positive good) move and corresponding eval for the
@@ -281,6 +293,7 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Vec<M
                     alpha: mm.alpha,
                     beta: mm.beta,
                     quiesce: true,
+                    node_type: mm.node_type,
                 },
             );
         }
@@ -307,7 +320,10 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Vec<M
     if state.config.enable_trans_table {
         if let Some(entry) = &state.cache[board.zobrist] {
             trans_table_move = Some(entry.best_move);
-            if entry.is_qsearch == mm.quiesce && usize::from(entry.depth) >= mm.depth {
+            if usize::from(entry.depth) >= mm.depth
+                && entry.is_qsearch == mm.quiesce
+                && mm.node_type == entry.node_type
+            {
                 if let SearchEval::Exact(_) | SearchEval::Upper(_) = entry.eval {
                     // at this point, we could just return the best move + eval given, but this
                     // bypasses the draw by repetition checks in `minmax`. so just don't generate
@@ -376,18 +392,50 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Vec<M
         }
     }
 
+    // true in a pv node, until we find a move that raises alpha. then, it becomes false.
+    let mut is_pv = matches!(mm.node_type, NodeType::PV);
+
     for (_priority, mv) in mvs {
         let anti_mv = mv.make(board);
-        let (continuation, score) = minmax(
+
+        // only use null window when we have move ordering through the transposition table
+        let do_null_window = !is_pv && trans_table_move.is_some() && mm.depth > 2;
+
+        let new_depth = mm.depth - if do_extension { 0 } else { 1 };
+
+        let (mut continuation, mut score) = minmax(
             board,
             state,
             MinmaxState {
-                depth: mm.depth - if do_extension { 0 } else { 1 },
-                alpha: Some(-beta),
+                depth: new_depth,
+                alpha: Some(if do_null_window { -(alpha + 1) } else { -beta }),
                 beta: Some(-alpha),
                 quiesce: mm.quiesce,
+                node_type: if is_pv { NodeType::PV } else { NodeType::NonPV },
             },
         );
+
+        if do_null_window {
+            let abs_score = score.increment();
+            if let SearchEval::Lower(cp) = abs_score {
+                if alpha <= cp && cp <= beta {
+                    // alpha means this move was better than expected, so re-search with full window
+                    // if it's above beta then don't even bother re-searching, it causes a cutoff
+                    (continuation, score) = minmax(
+                        board,
+                        state,
+                        MinmaxState {
+                            depth: new_depth,
+                            alpha: Some(-beta),
+                            beta: Some(-alpha),
+                            quiesce: mm.quiesce,
+                            node_type: NodeType::PV,
+                        },
+                    );
+                }
+            }
+        }
+
         anti_mv.unmake(board);
 
         // propagate hard stops
@@ -401,7 +449,10 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Vec<M
             best_move = Some(mv);
             best_continuation = continuation;
         }
-        alpha = max(alpha, abs_best.into());
+        if EvalInt::from(abs_best) > alpha {
+            alpha = abs_best.into();
+            is_pv = false;
+        }
         if alpha >= beta && state.config.alpha_beta_on {
             // alpha-beta prune.
             //
@@ -437,6 +488,7 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Vec<M
                     is_qsearch: mm.quiesce,
                     // `as u8` will wrap around to 0, but that's accounted for
                     age: half_move,
+                    node_type: mm.node_type,
                 },
             );
         }
@@ -458,6 +510,7 @@ pub struct TranspositionEntry {
     is_qsearch: bool,
     /// half move number when this entry was saved
     age: u8,
+    node_type: NodeType,
 }
 
 impl crate::hash::TableReplacement for TranspositionEntry {
@@ -488,6 +541,7 @@ mod replacement_test {
             depth: 2,
             is_qsearch: false,
             age: 0,
+            node_type: NodeType::PV,
         };
         let e2 = TranspositionEntry {
             age: 253,
@@ -557,6 +611,7 @@ fn iter_deep(board: &mut Board, state: &mut EngineState) -> (Vec<Move>, SearchEv
             alpha: None,
             beta: None,
             quiesce: false,
+            node_type: NodeType::PV,
         },
     );
 
@@ -578,6 +633,7 @@ fn iter_deep(board: &mut Board, state: &mut EngineState) -> (Vec<Move>, SearchEv
                 alpha: None,
                 beta: None,
                 quiesce: false,
+                node_type: NodeType::PV,
             },
         );
 
