@@ -160,8 +160,13 @@ class StrToTensor(nn.Module):
 class MvToDevice(nn.Module):
     """Moves a tensor to the GPU (or whatever device training is done on)."""
 
+    def forward(self, x: torch.Tensor):
+        return x.to(device=device)
+
+
+class FromNumpy(nn.Module):
     def forward(self, x: np.ndarray):
-        return torch.from_numpy(x).to(device=device)
+        return torch.from_numpy(x)
 
 
 class ConvertSparse(nn.Module):
@@ -255,10 +260,16 @@ class ChessPositionDataset(Dataset):
         # self.k = tune_sigmoid(self.data["centipawns"], self.data["game_result"])
         self.k = np.double(400.0)
 
-        tqdm.pandas(desc="SENDING TO DEVICE")
+        tqdm.pandas(desc="CONVERT NP -> TORCH")
         self.data["board_features"] = self.data["board_features"].progress_apply(
-            MvToDevice()
+            FromNumpy()
         )
+
+        if device != "cpu":
+            tqdm.pandas(desc="SENDING TO DEVICE")
+            self.data["board_features"] = self.data["board_features"].progress_apply(
+                MvToDevice()
+            )
 
         # interpolate engine analysis and real result in WDL-space
         self.data["expected_result"] = (LAMBDA) * np_sigmoid(
