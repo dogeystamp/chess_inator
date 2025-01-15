@@ -103,7 +103,7 @@ if __name__ == "__main__":
 
     with torch.no_grad():
         model = s3nn.NNUE()
-        s3nn.load_model(args.pth, model, None)
+        s3nn.load_model(args.pth, model, None, None)
 
         arch: str = model.arch
 

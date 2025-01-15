@@ -56,13 +56,13 @@ value should work. For a smarter engine, use a higher value, like 0.97, so that
 it can go through reinforcement learning based on its existing knowledge.
 """
 
-LEARN_RATE = 1e-3
+LEARN_RATE = 1e-2
 BATCH_SIZE = 16384
-EPOCHS = 20
+EPOCHS = 12
 
 # neural net architecture
 
-HIDDEN_SIZE = 192
+HIDDEN_SIZE = 512
 """Hidden layer size."""
 
 INPUT_SIZE = 2 * 6 * 64  # 768
@@ -111,6 +111,11 @@ parser.add_argument(
     "--force-load",
     action="store_true",
     help="Load models even if their architecture information is incompatible.",
+)
+parser.add_argument(
+    "--force-epochs",
+    action="store_true",
+    help="Sets the epoch counter on a loaded checkpoint to 0. Useful for fine-tuning using existing weights.",
 )
 parser.add_argument(
     "--log",
@@ -197,7 +202,9 @@ class ChessPositionDataset(Dataset):
             for chunk in tqdm(
                 pd.read_csv(data_file, delimiter="\t", chunksize=CHUNK_SIZE),
                 desc="READ DATASET",
-                unit="chunk",
+                unit="rows",
+                delay=1.5,
+                unit_scale=CHUNK_SIZE,
                 postfix=dict(chk_sz=CHUNK_SIZE),
             ):
                 chunk: pd.DataFrame
@@ -523,13 +530,16 @@ def train(
     logging.info("Using device '%s' for training.", device)
 
     loss_fn = torch.nn.MSELoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=LEARN_RATE)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=LEARN_RATE)
+    scheduler = torch.optim.lr_scheduler.LinearLR(
+        optimizer, start_factor=1.0, end_factor=0.1, total_iters=8
+    )
 
     epoch_start = 0
 
     if load_path and load_path.is_file():
         logging.info("Loading saved model from '%s'...", load_path)
-        saved_epoch = load_model(load_path, model, optimizer)
+        saved_epoch = load_model(load_path, model, optimizer, scheduler)
         if saved_epoch is not None:
             logging.info("Last session ended with epoch %d.", saved_epoch + 1)
             epoch_start = saved_epoch + 1
@@ -539,10 +549,12 @@ def train(
         train_loss = train_loop(train_dataloader, model, loss_fn, optimizer)
         test_loss = test_loop(test_dataloader, model, loss_fn)
 
+        scheduler.step()
+
         print(f"\navg TRAIN loss: {train_loss:>5f}")
         print(f"avg  TEST loss: {test_loss:>5f}\n")
         if save_path:
-            save_model(save_path, model, optimizer, epoch_idx)
+            save_model(save_path, model, optimizer, scheduler, epoch_idx)
             logging.info("Saved progress to '%s'.", save_path)
         if log_path:
             if not log_path.exists():
@@ -578,7 +590,10 @@ def visualize_train_log(log_path: Path = Path("log_training.csv")):
 
 
 def load_model(
-    load_path: Path, model: NNUE, optimizer: torch.optim.Optimizer | None
+    load_path: Path,
+    model: NNUE,
+    optimizer: torch.optim.Optimizer | None,
+    scheduler: torch.optim.lr_scheduler.LRScheduler | None,
 ) -> int | None:
     """
     Load a model checkpoint.
@@ -618,23 +633,32 @@ def load_model(
     if optimizer:
         if state := checkpoint["optimizer_state_dict"]:
             optimizer.load_state_dict(state)
+    if scheduler:
+        if state := checkpoint["scheduler_state_dict"]:
+            scheduler.load_state_dict(state)
     model.l1_size = checkpoint.get("l1_size") or model.l1_size
-    return checkpoint.get("epoch")
+    if "args" in globals() and args.force_epochs:
+        return None
+    else:
+        return checkpoint.get("epoch")
 
 
 def save_model(
     save_path: Path,
     model: NNUE,
     optimizer: torch.optim.Optimizer | None,
+    scheduler: torch.optim.lr_scheduler.LRScheduler | None,
     epoch: int | None,
 ):
     """Save a model as a checkpoint."""
 
     optim_state = optimizer.state_dict() if optimizer else None
+    scheduler_state = scheduler.state_dict() if scheduler else None
 
     torch.save(
         dict(
             model_state_dict=model.state_dict(),
+            scheduler_state_dict=scheduler_state,
             optimizer_state_dict=optim_state,
             epoch=epoch,
             k=torch.as_tensor(model.k),
