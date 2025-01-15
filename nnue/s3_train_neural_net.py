@@ -11,12 +11,14 @@
 
 """Train the NNUE weights."""
 
+import math
 import torch
 import pandas as pd
 import numpy as np
 import logging
 import argparse
 import csv
+import gzip
 
 from torch.utils.data import Dataset, DataLoader
 from torch import nn
@@ -197,13 +199,23 @@ class ChessPositionDataset(Dataset):
 
             output = []
 
+            total_rows = 0
+
+            with gzip.open(data_file) as f:
+                count = 0
+                for count, _ in tqdm(
+                    enumerate(f), desc="COUNT ROWS", unit="rows", delay=0.25
+                ):
+                    pass
+                total_rows = count
+
             CHUNK_SIZE = 65536
 
             for chunk in tqdm(
                 pd.read_csv(data_file, delimiter="\t", chunksize=CHUNK_SIZE),
                 desc="READ DATASET",
+                total=math.ceil(total_rows / CHUNK_SIZE),
                 unit="rows",
-                delay=1.5,
                 unit_scale=CHUNK_SIZE,
                 postfix=dict(chk_sz=CHUNK_SIZE),
             ):
