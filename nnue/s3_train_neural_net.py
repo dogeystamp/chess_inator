@@ -149,15 +149,17 @@ class StrToTensor(nn.Module):
 
             return indices
 
+
 class MvToDevice(nn.Module):
     """Moves a tensor to the GPU (or whatever device training is done on)."""
 
     def forward(self, x: np.ndarray):
         return torch.from_numpy(x).to(device=device)
 
+
 class ConvertSparse(nn.Module):
     """
-    Convert our binary sparse tensor to a Torch sparse tensor.
+    Convert our binary sparse tensor to a Torch dense tensor.
 
     The reason why we can't directly use the Torch sparse type is that it stores redundant values,
     while we know that in our tensors all values are '1'.
@@ -166,8 +168,11 @@ class ConvertSparse(nn.Module):
     def forward(self, x: torch.Tensor):
         with torch.no_grad():
             return torch.sparse_coo_tensor(
-                x, torch.ones(x.shape[0]), device=device
-            )
+                x.unsqueeze(0),
+                torch.ones(x.shape[0], device=device),
+                device=device,
+                size=[INPUT_SIZE],
+            ).to_dense()
 
 
 str_to_tensor = StrToTensor()
@@ -227,7 +232,7 @@ class ChessPositionDataset(Dataset):
 
         # tune sigmoid
         # self.k = tune_sigmoid(self.data["centipawns"], self.data["game_result"])
-        self.k = 400.0
+        self.k = np.double(400.0)
 
         tqdm.pandas(desc="SENDING TO DEVICE")
         self.data["board_features"] = self.data["board_features"].progress_apply(
