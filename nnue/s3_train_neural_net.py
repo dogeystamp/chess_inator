@@ -201,13 +201,16 @@ class ChessPositionDataset(Dataset):
 
             total_rows = 0
 
-            with gzip.open(data_file) as f:
-                count = 0
-                for count, _ in tqdm(
-                    enumerate(f), desc="COUNT ROWS", unit="rows", delay=0.25
-                ):
-                    pass
-                total_rows = count
+            with gzip.open(data_file, "rb") as f:
+                t = tqdm(unit=" rows", desc="COUNT ROWS", delay=0.5, unit_scale=True)
+
+                BUF_SIZE = 1024 * 1024
+                buf = f.read(BUF_SIZE)
+                while buf:
+                    t.update(buf.count(b'\n'))
+                    buf = f.read(BUF_SIZE)
+
+                total_rows = t.n
 
             CHUNK_SIZE = 65536
 
@@ -215,8 +218,7 @@ class ChessPositionDataset(Dataset):
                 pd.read_csv(data_file, delimiter="\t", chunksize=CHUNK_SIZE),
                 desc="READ DATASET",
                 total=math.ceil(total_rows / CHUNK_SIZE),
-                unit="rows",
-                unit_scale=CHUNK_SIZE,
+                unit="chunk",
                 postfix=dict(chk_sz=CHUNK_SIZE),
             ):
                 chunk: pd.DataFrame
