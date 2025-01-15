@@ -149,6 +149,11 @@ class StrToTensor(nn.Module):
 
             return indices
 
+class MvToDevice(nn.Module):
+    """Moves a tensor to the GPU (or whatever device training is done on)."""
+
+    def forward(self, x: np.ndarray):
+        return torch.from_numpy(x).to(device=device)
 
 class ConvertSparse(nn.Module):
     """
@@ -161,7 +166,7 @@ class ConvertSparse(nn.Module):
     def forward(self, x: torch.Tensor):
         with torch.no_grad():
             return torch.sparse_coo_tensor(
-                torch.from_numpy(x), torch.ones(x.shape[0]), device=device
+                x, torch.ones(x.shape[0]), device=device
             )
 
 
@@ -224,6 +229,10 @@ class ChessPositionDataset(Dataset):
         # self.k = tune_sigmoid(self.data["centipawns"], self.data["game_result"])
         self.k = 400.0
 
+        tqdm.pandas(desc="SENDING TO DEVICE")
+        self.data["board_features"] = self.data["board_features"].progress_apply(
+            MvToDevice()
+        )
 
         # interpolate engine analysis and real result in WDL-space
         self.data["expected_result"] = (LAMBDA) * np_sigmoid(
