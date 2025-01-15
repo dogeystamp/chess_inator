@@ -131,44 +131,87 @@ parser.add_argument(
 
 
 class StrToTensor(nn.Module):
-    """Multi-hot bitstring to tensor conversion."""
+    """
+    Multi-hot bitstring to sparse tensor conversion.
+
+    Takes in a string comprised of '0' and '1', and returns the indices where the string is '1'.
+    """
 
     def forward(self, x: str):
         arr = np.frombuffer(bytearray(x, "utf-8"), np.int8) - ord("0")
         arr.setflags(write=True)
-        return torch.from_numpy(arr)
+
+        # u8 can't fit indices up to 768
+        # by default, a wasteful int64 might be used
+        indices = np.astype(np.nonzero(arr)[0], np.uint16)
+
+        return indices
 
 
-class MvToDevice(nn.Module):
-    """Moves a tensor to the GPU (or whatever device training is done on)."""
+class ConvertSparse(nn.Module):
+    """
+    Convert our binary sparse tensor to a Torch sparse tensor.
+
+    The reason why we can't directly use the Torch sparse type is that it stores redundant values,
+    while we know that in our tensors all values are '1'.
+    """
 
     def forward(self, x: torch.Tensor):
-        return x.to(device=device)
+        return torch.sparse_coo_tensor(
+            torch.from_numpy(x), torch.ones(x.shape[0]), device=device
+        )
 
 
 str_to_tensor = StrToTensor()
-# str_to_tensor = torch.compile(StrToTensor(), mode="default")
+convert_sparse = ConvertSparse()
 
 
 class ChessPositionDataset(Dataset):
     def __init__(self, data_file: Path):
-        self.data = pd.read_csv(data_file, delimiter="\t")
-        self.data.columns = ["fen", "board_features", "centipawns", "game_result"]
+        def chunked_reader(data_file: Path):
+            """
+            Read data in chunks, and incrementally compress it in memory.
 
-        # convert from (-1, 0, 1) to WDL-space (0, 0.5, 1)
-        self.data["game_result"] = (self.data["game_result"] + 1) / 2
+            Important steps done are:
+            - using a sparse board feature representation
+            - downsizing to smaller numeric types (e.g. int32, float16)
+            """
 
-        # convert features to tensors
-        tqdm.pandas(desc="STRING PARSING")
-        self.data["board_features"] = self.data["board_features"].progress_apply(
-            str_to_tensor
-        )
+            output = []
 
-        tqdm.pandas(desc="SENDING TO DEVICE")
-        self.data["board_features"] = self.data["board_features"].progress_apply(
-            MvToDevice()
-        )
+            CHUNK_SIZE = 1024
 
+            for chunk in tqdm(
+                pd.read_csv(data_file, delimiter="\t", chunksize=CHUNK_SIZE),
+                desc="READ DATASET",
+                unit="chunks",
+                postfix=dict(chk_sz=CHUNK_SIZE),
+            ):
+                chunk: pd.DataFrame
+
+                chunk.columns = ["fen", "board_features", "centipawns", "game_result"]
+
+                # save on memory
+                del chunk["fen"]
+
+                chunk["centipawns"] = chunk["centipawns"].astype(np.int32)
+
+                # convert from (-1, 0, 1) to WDL-space (0, 0.5, 1)
+                chunk["game_result"] = ((chunk["game_result"] + 1) / 2).astype(
+                    np.float32
+                )
+
+                # convert features
+                chunk["board_features"] = chunk["board_features"].apply(str_to_tensor)
+
+                output += chunk.to_dict(orient="records")
+
+            df = pd.DataFrame(output)
+            return df
+
+        self.data = chunked_reader(data_file)
+
+        # TODO: use a fixed K = 400 to avoid drift
         # tune sigmoid
         self.k = tune_sigmoid(self.data["centipawns"], self.data["game_result"])
 
@@ -183,7 +226,7 @@ class ChessPositionDataset(Dataset):
     def __getitem__(self, idx):
         row = self.data.iloc[idx]
         return (
-            row["board_features"],
+            convert_sparse(row["board_features"]),
             torch.tensor(row["expected_result"], dtype=torch.double, device=device),
         )
 
