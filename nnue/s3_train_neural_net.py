@@ -23,6 +23,7 @@ from torch import nn
 from pathlib import Path
 from scipy.optimize import curve_fit
 from tqdm import tqdm
+import gc
 
 
 logging.basicConfig(level=logging.INFO)
@@ -138,14 +139,15 @@ class StrToTensor(nn.Module):
     """
 
     def forward(self, x: str):
-        arr = np.frombuffer(bytearray(x, "utf-8"), np.int8) - ord("0")
-        arr.setflags(write=True)
+        with torch.no_grad():
+            arr = np.frombuffer(bytearray(x, "utf-8"), np.int8) - ord("0")
+            arr.setflags(write=True)
 
-        # u8 can't fit indices up to 768
-        # by default, a wasteful int64 might be used
-        indices = np.astype(np.nonzero(arr)[0], np.uint16)
+            # u8 can't fit indices up to 768
+            # by default, a wasteful int64 might be used
+            indices = np.astype(np.nonzero(arr)[0], np.uint16)
 
-        return indices
+            return indices
 
 
 class ConvertSparse(nn.Module):
@@ -157,9 +159,10 @@ class ConvertSparse(nn.Module):
     """
 
     def forward(self, x: torch.Tensor):
-        return torch.sparse_coo_tensor(
-            torch.from_numpy(x), torch.ones(x.shape[0]), device=device
-        )
+        with torch.no_grad():
+            return torch.sparse_coo_tensor(
+                torch.from_numpy(x), torch.ones(x.shape[0]), device=device
+            )
 
 
 str_to_tensor = StrToTensor()
@@ -179,12 +182,12 @@ class ChessPositionDataset(Dataset):
 
             output = []
 
-            CHUNK_SIZE = 1024
+            CHUNK_SIZE = 65536
 
             for chunk in tqdm(
                 pd.read_csv(data_file, delimiter="\t", chunksize=CHUNK_SIZE),
                 desc="READ DATASET",
-                unit="chunks",
+                unit="chunk",
                 postfix=dict(chk_sz=CHUNK_SIZE),
             ):
                 chunk: pd.DataFrame
@@ -194,11 +197,11 @@ class ChessPositionDataset(Dataset):
                 # save on memory
                 del chunk["fen"]
 
-                chunk["centipawns"] = chunk["centipawns"].astype(np.int32)
+                chunk["centipawns"] = chunk["centipawns"].astype(np.int32, copy=False)
 
                 # convert from (-1, 0, 1) to WDL-space (0, 0.5, 1)
                 chunk["game_result"] = ((chunk["game_result"] + 1) / 2).astype(
-                    np.float32
+                    np.float32, copy=False
                 )
 
                 # convert features
@@ -206,14 +209,21 @@ class ChessPositionDataset(Dataset):
 
                 output += chunk.to_dict(orient="records")
 
+                # https://stackoverflow.com/a/49144260
+                # magical incantation to summon the garbage collector
+                del chunk
+                gc.collect()
+                chunk = pd.DataFrame()  # noqa: F841
+
             df = pd.DataFrame(output)
             return df
 
         self.data = chunked_reader(data_file)
 
-        # TODO: use a fixed K = 400 to avoid drift
         # tune sigmoid
-        self.k = tune_sigmoid(self.data["centipawns"], self.data["game_result"])
+        # self.k = tune_sigmoid(self.data["centipawns"], self.data["game_result"])
+        self.k = 400.0
+
 
         # interpolate engine analysis and real result in WDL-space
         self.data["expected_result"] = (LAMBDA) * np_sigmoid(
