@@ -9,9 +9,17 @@
 #
 # Copyright © 2024 dogeystamp <dogeystamp@disroot.org>
 
-"""Train the NNUE weights."""
+"""
+Train the NNUE weights.
 
+Due to memory concerns, the training data is split into individual datasets
+(each has `BIG_BATCH_SIZE` rows). Each of these datasets has its train/test,
+and each dataset will be used for `EPOCHS` epochs.
+"""
+
+import itertools
 import math
+from typing import Iterable
 import torch
 import pandas as pd
 import numpy as np
@@ -60,11 +68,13 @@ it can go through reinforcement learning based on its existing knowledge.
 
 LEARN_RATE = 1e-2
 BATCH_SIZE = 16384
-EPOCHS = 12
+BIG_BATCH_SIZE = 2**22
+
+EPOCHS = 7
 
 # neural net architecture
 
-HIDDEN_SIZE = 512
+HIDDEN_SIZE = 320
 """Hidden layer size."""
 
 INPUT_SIZE = 2 * 6 * 64  # 768
@@ -179,82 +189,112 @@ class ConvertSparse(nn.Module):
 
     def forward(self, x: torch.Tensor):
         with torch.no_grad():
-            return torch.sparse_coo_tensor(
-                x.unsqueeze(0),
-                torch.ones(x.shape[0], device=device),
-                device=device,
-                size=[INPUT_SIZE],
-            ).to_dense()
+            return (
+                torch.sparse_coo_tensor(
+                    x.unsqueeze(0),
+                    torch.ones(x.shape[0], device=device),
+                    device=device,
+                    size=[INPUT_SIZE],
+                )
+                .to_dense()
+                .to(dtype=torch.double)
+            )
 
 
 str_to_tensor = StrToTensor()
 convert_sparse = ConvertSparse()
 
 
+def count_total_rows(data_file: Path):
+    """Count total rows in a .tsv.gz file."""
+    with gzip.open(data_file, "rb") as f:
+        t = tqdm(unit=" rows", desc="COUNT ROWS", delay=0.5, unit_scale=True)
+
+        BUF_SIZE = 1024 * 1024
+        buf = f.read(BUF_SIZE)
+        while buf:
+            t.update(buf.count(b"\n"))
+            buf = f.read(BUF_SIZE)
+        return t.n
+
+
 class ChessPositionDataset(Dataset):
-    def __init__(self, data_file: Path):
-        def chunked_reader(data_file: Path):
-            """
-            Read data in chunks, and incrementally compress it in memory.
+    """
+    Single big batch.
 
-            Important steps done are:
-            - using a sparse board feature representation
-            - downsizing to smaller numeric types (e.g. int32, float16)
-            """
+    Raises `pandas.errors.EmptyDataError` if there is no data at this batch.
+    """
 
-            output = []
+    def __chunked_reader(self) -> pd.DataFrame:
+        """
+        Read data in chunks, and incrementally compress it in memory.
 
-            total_rows = 0
+        Important steps done are:
+        - using a sparse board feature representation
+        - downsizing to smaller numeric types (e.g. int32, float16)
 
-            with gzip.open(data_file, "rb") as f:
-                t = tqdm(unit=" rows", desc="COUNT ROWS", delay=0.5, unit_scale=True)
+        This function automatically reads `BIG_BATCH_SIZE` rows,
+        starting from the `cur_big_batch`.
 
-                BUF_SIZE = 1024 * 1024
-                buf = f.read(BUF_SIZE)
-                while buf:
-                    t.update(buf.count(b'\n'))
-                    buf = f.read(BUF_SIZE)
+        Returns
+        -------
+        Pandas dataframe, or raises `pandas.errors.EmptyDataError` if
+        there is no more data.
+        """
 
-                total_rows = t.n
+        output = []
 
-            CHUNK_SIZE = 65536
+        CHUNK_SIZE = 65536
 
-            for chunk in tqdm(
-                pd.read_csv(data_file, delimiter="\t", chunksize=CHUNK_SIZE),
-                desc="READ DATASET",
-                total=math.ceil(total_rows / CHUNK_SIZE),
-                unit="chunk",
-                postfix=dict(chk_sz=CHUNK_SIZE),
-            ):
-                chunk: pd.DataFrame
+        for chunk in tqdm(
+            pd.read_csv(
+                self.data_file,
+                delimiter="\t",
+                chunksize=CHUNK_SIZE,
+                skiprows=self.cur_big_batch * BIG_BATCH_SIZE,
+                nrows=BIG_BATCH_SIZE,
+            ),
+            desc="READ BIG BATCH",
+            total=math.ceil(BIG_BATCH_SIZE / CHUNK_SIZE),
+            unit="chunk",
+            postfix=dict(chk_sz=CHUNK_SIZE),
+        ):
+            chunk: pd.DataFrame
 
-                chunk.columns = ["fen", "board_features", "centipawns", "game_result"]
+            chunk.columns = ["fen", "board_features", "centipawns", "game_result"]
 
-                # save on memory
-                del chunk["fen"]
+            # save on memory
+            del chunk["fen"]
 
-                chunk["centipawns"] = chunk["centipawns"].astype(np.int32, copy=False)
+            chunk["centipawns"] = chunk["centipawns"].astype(np.int32, copy=False)
 
-                # convert from (-1, 0, 1) to WDL-space (0, 0.5, 1)
-                chunk["game_result"] = ((chunk["game_result"] + 1) / 2).astype(
-                    np.float32, copy=False
-                )
+            # convert from (-1, 0, 1) to WDL-space (0, 0.5, 1)
+            chunk["game_result"] = ((chunk["game_result"] + 1) / 2).astype(
+                np.float32, copy=False
+            )
 
-                # convert features
-                chunk["board_features"] = chunk["board_features"].apply(str_to_tensor)
+            # convert features
+            chunk["board_features"] = chunk["board_features"].apply(str_to_tensor)
 
-                output += chunk.to_dict(orient="records")
+            output += chunk.to_dict(orient="records")
 
-                # https://stackoverflow.com/a/49144260
-                # magical incantation to summon the garbage collector
-                del chunk
-                gc.collect()
-                chunk = pd.DataFrame()  # noqa: F841
+            # https://stackoverflow.com/a/49144260
+            # magical incantation to summon the garbage collector
+            del chunk
+            gc.collect()
+            chunk = pd.DataFrame()  # noqa: F841
 
-            df = pd.DataFrame(output)
-            return df
+        df = pd.DataFrame(output)
+        return df
 
-        self.data = chunked_reader(data_file)
+    def __init__(self, data_file: Path, cur_big_batch: int):
+        self.total_rows = 0
+        self.data_file = data_file
+
+        self.cur_big_batch = cur_big_batch
+        """Index of the big batch to load."""
+
+        self.data = self.__chunked_reader()
 
         # tune sigmoid
         # self.k = tune_sigmoid(self.data["centipawns"], self.data["game_result"])
@@ -283,7 +323,9 @@ class ChessPositionDataset(Dataset):
         row = self.data.iloc[idx]
         return (
             convert_sparse(row["board_features"]),
-            torch.tensor(row["expected_result"], dtype=torch.double, device=device),
+            torch.tensor(
+                row["expected_result"], dtype=torch.double, device=device
+            ).unsqueeze(-1),
         )
 
     def plot_sigmoid(self):
@@ -448,14 +490,6 @@ class NNUE(nn.Module):
 ################################
 
 
-def get_x_y_from_batch(batch):
-    """Returns training input (X) and label (Y) for a given batch."""
-    x = batch[0].to(dtype=torch.double)
-    y = batch[1].unsqueeze(-1)
-
-    return x, y
-
-
 def train_loop(dataloader, model, loss_fn, optimizer) -> np.double:
     """
     Train model for one epoch.
@@ -477,7 +511,7 @@ def train_loop(dataloader, model, loss_fn, optimizer) -> np.double:
             postfix=dict(batch_sz=BATCH_SIZE),
         )
     ):
-        x, y = get_x_y_from_batch(batch)
+        x, y = batch
         pred = model(x)
         loss = loss_fn(pred, y)
         avg_loss += loss.detach().item()
@@ -511,12 +545,37 @@ def test_loop(dataloader, model, loss_fn) -> np.double:
             unit="batch",
             postfix=dict(batch_sz=BATCH_SIZE),
         ):
-            x, y = get_x_y_from_batch(batch)
+            x, y = batch
             pred = model(x)
             test_loss += loss_fn(pred, y).item()
 
     test_loss /= n_batches
     return test_loss
+
+
+class BigBatchLoader:
+    """
+    Load big batches from the .tsv.gz.
+
+    Arguments
+    ---------
+    start: Start at this big batch index.
+    """
+
+    def __init__(self, data_file: Path, start: int):
+        self.total_rows = count_total_rows(data_file)
+        self.data_file = data_file
+        self.start = start
+
+    def big_batches(self) -> Iterable[tuple[int, ChessPositionDataset]]:
+        try:
+            for i in itertools.count(start=self.start):
+                yield i, ChessPositionDataset(self.data_file, i)
+        except pd.errors.EmptyDataError:
+            pass
+
+    def __len__(self) -> int:
+        return math.ceil(self.total_rows / BIG_BATCH_SIZE)
 
 
 def train(
@@ -529,66 +588,81 @@ def train(
     Train the model's parameters.
     """
 
-    logging.info("Loading dataset...")
-    full_dataset = ChessPositionDataset(args.datafile)
-    logging.info("Loaded dataset (%d rows).", len(full_dataset))
-    model.k = full_dataset.k
-
-    generator = torch.Generator().manual_seed(42)
-    train_dataset, test_dataset = torch.utils.data.random_split(
-        full_dataset, [0.9, 0.1], generator=generator
-    )
-
-    train_dataloader = DataLoader(
-        train_dataset,
-        num_workers=NUM_WORKERS,
-        batch_size=BATCH_SIZE,
-        shuffle=True,
-    )
-    test_dataloader = DataLoader(
-        test_dataset,
-        num_workers=NUM_WORKERS,
-        batch_size=BATCH_SIZE,
-        shuffle=True,
-    )
-
     logging.info("Using device '%s' for training.", device)
 
     loss_fn = torch.nn.MSELoss()
     optimizer = torch.optim.AdamW(model.parameters(), lr=LEARN_RATE)
     scheduler = torch.optim.lr_scheduler.LinearLR(
-        optimizer, start_factor=1.0, end_factor=0.1, total_iters=8
+        optimizer, start_factor=1.0, end_factor=1.0, total_iters=8
     )
 
-    epoch_start = 0
+    big_epoch_start, epoch_start = 0, 0
 
     if load_path and load_path.is_file():
         logging.info("Loading saved model from '%s'...", load_path)
         saved_epoch = load_model(load_path, model, optimizer, scheduler)
         if saved_epoch is not None:
-            logging.info("Last session ended with epoch %d.", saved_epoch + 1)
-            epoch_start = saved_epoch + 1
+            last_big_epoch, last_epoch = divmod(saved_epoch, EPOCHS)
+            big_epoch_start, epoch_start = divmod(saved_epoch+1, EPOCHS)
+            logging.info(
+                "Last session ended with big batch %d, epoch %d.",
+                last_big_epoch + 1,
+                last_epoch + 1,
+            )
 
-    for epoch_idx in range(epoch_start, EPOCHS):
-        print(f"\nEPOCH {epoch_idx + 1} / {EPOCHS}\n---------------------------------")
-        train_loss = train_loop(train_dataloader, model, loss_fn, optimizer)
-        test_loss = test_loop(test_dataloader, model, loss_fn)
+    big_batch_loader = BigBatchLoader(args.datafile, big_epoch_start)
+    for big_batch_idx, big_batch in big_batch_loader.big_batches():
+        logging.info("Loaded big batch dataset (%d rows).", len(big_batch))
+        model.k = big_batch.k
 
-        scheduler.step()
+        generator = torch.Generator().manual_seed(42)
+        train_dataset, test_dataset = torch.utils.data.random_split(
+            big_batch, [0.97, 0.03], generator=generator
+        )
 
-        print(f"\navg TRAIN loss: {train_loss:>5f}")
-        print(f"avg  TEST loss: {test_loss:>5f}\n")
-        if save_path:
-            save_model(save_path, model, optimizer, scheduler, epoch_idx)
-            logging.info("Saved progress to '%s'.", save_path)
-        if log_path:
-            if not log_path.exists():
-                with log_path.open("w") as f:
+        train_dataloader = DataLoader(
+            train_dataset,
+            num_workers=NUM_WORKERS,
+            batch_size=BATCH_SIZE,
+            shuffle=True,
+        )
+        test_dataloader = DataLoader(
+            test_dataset,
+            num_workers=NUM_WORKERS,
+            batch_size=BATCH_SIZE,
+            shuffle=True,
+        )
+
+        for epoch_idx in range(epoch_start, EPOCHS):
+            print(
+                f"\nBIG BATCH {big_batch_idx + 1}/{len(big_batch_loader)}, EPOCH {epoch_idx + 1} / {EPOCHS}\n---------------------------------"
+            )
+            train_loss = train_loop(train_dataloader, model, loss_fn, optimizer)
+            test_loss = test_loop(test_dataloader, model, loss_fn)
+
+            scheduler.step()
+
+            print(f"\navg TRAIN loss: {train_loss:>5f}")
+            print(f"avg  TEST loss: {test_loss:>5f}\n")
+            if save_path:
+                save_model(
+                    save_path,
+                    model,
+                    optimizer,
+                    scheduler,
+                    big_batch_idx * EPOCHS + epoch_idx,
+                )
+                logging.info("Saved progress to '%s'.", save_path)
+            if log_path:
+                if not log_path.exists():
+                    with log_path.open("w") as f:
+                        writer = csv.writer(f)
+                        writer.writerow(["epoch", "train_loss", "test_loss"])
+                with log_path.open("a") as f:
                     writer = csv.writer(f)
-                    writer.writerow(["epoch", "train_loss", "test_loss"])
-            with log_path.open("a") as f:
-                writer = csv.writer(f)
-                writer.writerow([epoch_idx, train_loss, test_loss])
+                    writer.writerow([epoch_idx, train_loss, test_loss])
+
+        epoch_start = 0
 
 
 def visualize_train_log(log_path: Path = Path("log_training.csv")):
