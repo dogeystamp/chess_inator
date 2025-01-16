@@ -673,13 +673,24 @@ def visualize_train_log(log_path: Path = Path("log_training.csv")):
     import pandas as pd
     import matplotlib.pyplot as plt
 
-    df = pd.read_csv(log_path)
+    df: pd.DataFrame = pd.read_csv(log_path)
+
+    end_epoch = max(df["epoch"])
     df = df.set_index("epoch")
+
     print(df)
-    df.plot()
-    plt.ylabel("loss")
+
+    max_v = max(df["test_loss"].values.max(), df["train_loss"].values.max()) # type: ignore
+
+    for i in range(0, end_epoch + 1, EPOCHS):
+        plt.plot([i, i], [0, max_v], linestyle="dashed", color="gray")
+
+    plt.plot(df.index, df["train_loss"], label="Train loss")
+    plt.plot(df.index, df["test_loss"], label="Test loss")
+    plt.ylabel("Loss")
     plt.title("Training progress")
     plt.grid()
+    plt.legend()
     plt.show()
 
 
