@@ -66,7 +66,7 @@ value should work. For a smarter engine, use a higher value, like 0.97, so that
 it can go through reinforcement learning based on its existing knowledge.
 """
 
-LEARN_RATE = 1e-2
+LEARN_RATE = 1e-3
 BATCH_SIZE = 16384
 BIG_BATCH_SIZE = 2**22
 
@@ -642,6 +642,8 @@ def train(
 
             scheduler.step()
 
+            total_epoch = big_batch_idx * EPOCHS + epoch_idx
+
             print(f"\navg TRAIN loss: {train_loss:>5f}")
             print(f"avg  TEST loss: {test_loss:>5f}\n")
             if save_path:
@@ -650,7 +652,7 @@ def train(
                     model,
                     optimizer,
                     scheduler,
-                    big_batch_idx * EPOCHS + epoch_idx,
+                    total_epoch,
                 )
                 logging.info("Saved progress to '%s'.", save_path)
             if log_path:
@@ -660,7 +662,7 @@ def train(
                         writer.writerow(["epoch", "train_loss", "test_loss"])
                 with log_path.open("a") as f:
                     writer = csv.writer(f)
-                    writer.writerow([epoch_idx, train_loss, test_loss])
+                    writer.writerow([total_epoch, train_loss, test_loss])
 
         epoch_start = 0
 
