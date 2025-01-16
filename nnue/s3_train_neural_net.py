@@ -70,7 +70,7 @@ LEARN_RATE = 1e-3
 BATCH_SIZE = 16384
 BIG_BATCH_SIZE = 2**22
 
-EPOCHS = 7
+EPOCHS = 5
 
 # neural net architecture
 
@@ -564,12 +564,13 @@ class BigBatchLoader:
 
     def __init__(self, data_file: Path, start: int):
         self.total_rows = count_total_rows(data_file)
+        self.total_big_batches = math.ceil(self.total_rows / BIG_BATCH_SIZE)
         self.data_file = data_file
         self.start = start
 
     def big_batches(self) -> Iterable[tuple[int, ChessPositionDataset]]:
         try:
-            for i in itertools.count(start=self.start):
+            for i in range(self.total_big_batches):
                 yield i, ChessPositionDataset(self.data_file, i)
         except pd.errors.EmptyDataError:
             pass
