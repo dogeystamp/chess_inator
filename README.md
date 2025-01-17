@@ -76,7 +76,7 @@ The real outcome is interpolated with the engine evaluation to give an
 By labelling the position with the real game outcome, the engine gets
 feedback on positions that are good and bad.
 
-Here is a log of the reinforcement learning used to train the engine, and the
+Here is a log of the machine learning used to train the engine, and the
 source of the data being used. See the [NNUE readme](./nnue/README.md) for
 technical details about the training pipeline.
 
@@ -89,6 +89,9 @@ technical details about the training pipeline.
 - **Generation 3:** (tag `nnue3-192`) increases the hidden layer size from 16
   to 192 neurons. It is trained on Lichess elite database positions (September
   2024), scored by gen 2's evaluation.
+- **Generation 4:** (tag `nnue4-320`) has 320 hidden layer neurons, and is
+  trained from gen 3's evaluation of around 18 million Lichess elite
+  database positions (June & July 2024).
 
 ## development instructions
 
