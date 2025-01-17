@@ -335,11 +335,12 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Vec<M
     }
 
     let mvs = match move_generator {
-        MoveGenerator::Quiescence => board.gen_captures().into_iter().collect::<Vec<_>>(),
-        MoveGenerator::Normal => board.gen_moves().into_iter().collect::<Vec<_>>(),
-        MoveGenerator::None => Vec::new(),
+        MoveGenerator::Quiescence => board.gen_captures(),
+        MoveGenerator::Normal => board.gen_moves(),
+        MoveGenerator::None => MoveList::new(),
     };
 
+    // TODO: arrayvec
     let mut mvs: Vec<_> = mvs
         .into_iter()
         .map(|mv| (move_priority(board, &mv, state), mv))

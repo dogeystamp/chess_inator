@@ -15,11 +15,18 @@ Copyright © 2024 dogeystamp <dogeystamp@disroot.org>
 
 use crate::fen::ToFen;
 use crate::hash::{Zobrist, ZobristTable};
+use crate::util::arrayvec::ArrayVec;
 use crate::{
     Board, CastleRights, ColPiece, Color, Piece, Square, SquareError, BOARD_HEIGHT, BOARD_WIDTH,
     N_SQUARES,
 };
 use std::ops::Not;
+
+/// Most moves possible (to store) in a single position.
+const MAX_MOVES: usize = 192;
+
+/// Internal type alias to help switch vector types easier
+pub type MoveList = ArrayVec<MAX_MOVES, Move>;
 
 /// Piece enum specifically for promotions.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -652,7 +659,7 @@ impl GenAttackers for Board {
         single: bool,
         filter_color: Option<Color>,
     ) -> impl IntoIterator<Item = (ColPiece, Move)> {
-        let mut ret: Vec<(ColPiece, Move)> = Vec::new();
+        let mut ret: ArrayVec<MAX_MOVES, (ColPiece, Move)> = ArrayVec::new();
 
         /// Filter attackers and add them to the return vector.
         ///
@@ -661,7 +668,7 @@ impl GenAttackers for Board {
             pc: ColPiece,
             sq: Square,
             dest: Square,
-            ret: &mut Vec<(ColPiece, Move)>,
+            ret: &mut ArrayVec<MAX_MOVES, (ColPiece, Move)>,
             filter_color: Option<Color>,
         ) -> bool {
             if let Some(filter_color) = filter_color {
@@ -736,7 +743,7 @@ impl GenAttackers for Board {
             board: &Board,
             dest: Square,
             pc: Piece,
-            ret: &mut Vec<(ColPiece, Move)>,
+            ret: &mut ArrayVec<MAX_MOVES, (ColPiece, Move)>,
             filter_color: Option<Color>,
             use_line_of_sight: bool,
             single: bool,
@@ -842,26 +849,26 @@ enum MoveGenType {
 
 /// Internal movegen interface with more options
 trait MoveGenInternal {
-    fn gen_moves_general(&mut self, config: MoveGenConfig) -> impl IntoIterator<Item = Move>;
+    fn gen_moves_general(&mut self, config: MoveGenConfig) -> MoveList;
 }
 
 pub trait MoveGen {
     /// Legal move generation.
-    fn gen_moves(&mut self) -> impl IntoIterator<Item = Move>;
+    fn gen_moves(&mut self) -> MoveList;
 
     /// Pseudo-legal move generation (see `MoveGenType::_Pseudo` for more information).
-    fn gen_pseudo(&mut self) -> impl IntoIterator<Item = Move>;
+    fn gen_pseudo(&mut self) -> MoveList;
 
     /// Legal capture generation.
-    fn gen_captures(&mut self) -> impl IntoIterator<Item = Move>;
+    fn gen_captures(&mut self) -> MoveList;
 }
 
 impl<T: MoveGenInternal> MoveGen for T {
-    fn gen_moves(&mut self) -> impl IntoIterator<Item = Move> {
+    fn gen_moves(&mut self) -> MoveList {
         self.gen_moves_general(MoveGenConfig::default())
     }
 
-    fn gen_pseudo(&mut self) -> impl IntoIterator<Item = Move> {
+    fn gen_pseudo(&mut self) -> MoveList {
         let config = MoveGenConfig {
             legality: MoveGenType::_Pseudo,
             ..Default::default()
@@ -869,7 +876,7 @@ impl<T: MoveGenInternal> MoveGen for T {
         self.gen_moves_general(config)
     }
 
-    fn gen_captures(&mut self) -> impl IntoIterator<Item = Move> {
+    fn gen_captures(&mut self) -> MoveList {
         let config = MoveGenConfig {
             captures_only: true,
             ..Default::default()
@@ -920,7 +927,7 @@ enum SliderDirection {
 fn move_slider(
     board: &Board,
     src: Square,
-    move_list: &mut Vec<Move>,
+    move_list: &mut MoveList,
     slide_type: SliderDirection,
     keep_going: bool,
     config: &MoveGenConfig,
@@ -996,8 +1003,8 @@ fn is_legal(board: &mut Board, mv: Move) -> bool {
 }
 
 impl MoveGenInternal for Board {
-    fn gen_moves_general(&mut self, config: MoveGenConfig) -> impl IntoIterator<Item = Move> {
-        let mut ret = Vec::new();
+    fn gen_moves_general(&mut self, config: MoveGenConfig) -> MoveList {
+        let mut ret = MoveList::new();
         let pl = self[self.turn];
         macro_rules! squares {
             ($pc: ident) => {
@@ -1209,7 +1216,7 @@ fn perft_internal(
 
     let mut ans = 0;
 
-    let moves: Vec<Move> = pos.gen_moves().into_iter().collect();
+    let moves: MoveList = pos.gen_moves();
     for mv in moves {
         let anti_move = mv.make(pos);
         ans += perft_internal(depth - 1, pos, cache);

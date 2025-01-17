@@ -24,6 +24,11 @@ fn test_perft() {
     // https://www.chessprogramming.org/Perft_Results
     let test_cases = [
         (
+            "QQqQqQqq/q6Q/Q6q/q6Q/Q6q/q6Q/Q6q/QqQqQqQq w - - 0 1",
+            vec![1, 412],
+            1,
+        ),
+        (
             // fen
             START_POSITION,
             // expected perft values
