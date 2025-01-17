@@ -13,7 +13,7 @@ Copyright © 2024 dogeystamp <dogeystamp@disroot.org>
 
 //! Zobrist hash implementation.
 
-use crate::random::Pcg64Random;
+use crate::util::random::Pcg64Random;
 use crate::{
     Board, CastleRights, ColPiece, Color, Square, BOARD_WIDTH, N_COLORS, N_PIECES, N_SQUARES,
 };

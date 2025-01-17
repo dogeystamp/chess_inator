@@ -51,7 +51,7 @@ impl Pcg64Random {
     /// # Example
     ///
     ///```rust
-    /// use chess_inator::random::Pcg64Random;
+    /// use chess_inator::util::random::Pcg64Random;
     ///
     /// // generate 3 random numbers
     /// const ARR: [u64; 3] = Pcg64Random::new(123456).random_arr_64();

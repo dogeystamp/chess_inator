@@ -21,11 +21,10 @@ pub mod coordination;
 pub mod eval;
 pub mod fen;
 mod hash;
+pub mod util;
 pub mod movegen;
 pub mod nnue;
-pub mod random;
 pub mod search;
-mod serialization;
 
 pub mod prelude;
 
