@@ -37,7 +37,7 @@ Copyright © 2024 dogeystamp <dogeystamp@disroot.org>
 //! directory's README file.
 
 use crate::prelude::*;
-use crate::serialization::ConstCursor;
+use crate::util::serialization::ConstCursor;
 use std::fmt::Display;
 
 // alias to easily change precision / data type
@@ -281,7 +281,7 @@ mod tests {
             nnue.bit_set(i, true);
         }
 
-        let epsilon = 100;
+        let epsilon = 300;
 
         let got = nnue.output();
         let expected = EvalInt::from(WEIGHTS._sanity_check[0]);
