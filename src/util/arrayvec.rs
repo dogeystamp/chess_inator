@@ -27,6 +27,7 @@ pub enum Error {
 ///
 /// 1. All elements in the range `0..len` are initialized.
 /// 2. `len` is in the range `0..=N`.
+#[derive(Debug)]
 pub struct ArrayVec<const N: usize, T: Sized> {
     /// The underlying array.
     data: [MaybeUninit<T>; N],
@@ -46,6 +47,14 @@ impl<const N: usize, T: Sized> ArrayVec<N, T> {
     /// Get the maximal capacity of this vector (i.e. the size of the backing array).
     pub fn capacity(&self) -> usize {
         N
+    }
+
+    pub fn last(&self) -> Option<&T> {
+        if self.len == 0 {
+            None
+        } else {
+            Some(&self[self.len - 1])
+        }
     }
 
     /// If true, can't push any more elements to this vector.
@@ -198,6 +207,17 @@ impl<const N: usize, T: Sized + Ord> ArrayVec<N, T> {
 impl<const N: usize, T: Sized> Default for ArrayVec<N, T> {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl<const N: usize, T: Sized + Clone> Clone for ArrayVec<N, T> {
+    fn clone(&self) -> Self {
+        let mut new = ArrayVec::<N, T>::new();
+        for elem in self.iter() {
+            new.push(elem.clone());
+        }
+
+        new
     }
 }
 

@@ -18,10 +18,10 @@ pub use crate::coordination::{
 };
 pub use crate::eval::{Eval, EvalInt, EvalSEE};
 pub use crate::fen::{FromFen, ToFen};
-pub use crate::movegen::{FromUCIAlgebraic, GenAttackers, Move, MoveGen, ToUCIAlgebraic, MoveList};
+pub use crate::movegen::{FromUCIAlgebraic, GenAttackers, Move, MoveGen, MoveList, ToUCIAlgebraic};
 pub use crate::search::{
-    best_line, best_move, EngineState, InterruptMode, SearchConfig, SearchEval, TimeLimits,
-    TranspositionTable,
+    best_line, best_move, EngineState, InterruptMode, PVStack, SearchConfig, SearchEval,
+    TimeLimits, TranspositionTable,
 };
 pub use crate::{
     Board, ColPiece, Color, Piece, Square, BOARD_HEIGHT, BOARD_WIDTH, N_COLORS, N_PIECES, N_SQUARES,

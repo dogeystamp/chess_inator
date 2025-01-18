@@ -156,7 +156,7 @@ mod test_state_machine {
 #[derive(Clone, Debug)]
 pub struct MsgBestmove {
     /// Best line (reversed stack; last element is best current move)
-    pub pv: Vec<Move>,
+    pub pv: PVStack,
     /// Evaluation of the position
     pub eval: SearchEval,
     /// Extra information (displayed as `info string`).

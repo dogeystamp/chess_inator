@@ -356,7 +356,6 @@ fn outp_bestmove(bestmove: MsgBestmove) {
         bestmove
             .pv
             .iter()
-            .rev()
             .map(|mv| mv.to_uci_algebraic())
             .fold(String::new(), |a, b| a + " " + &b)
     );
@@ -373,7 +372,7 @@ fn outp_bestmove(bestmove: MsgBestmove) {
         println!("info string {line}");
     }
 
-    let mut pv_in_order = bestmove.pv.iter().rev();
+    let mut pv_in_order = bestmove.pv.iter();
     let (chosen, ponder_mv) = (pv_in_order.next(), pv_in_order.next());
     match chosen {
         Some(mv) => print!("bestmove {}", mv.to_uci_algebraic()),
