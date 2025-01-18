@@ -13,7 +13,6 @@ Copyright © 2025 dogeystamp <dogeystamp@disroot.org>
 
 //! Custom useful tools.
 
-pub mod serialization;
 pub mod arrayvec;
-pub mod hybridvec;
 pub mod random;
+pub mod serialization;

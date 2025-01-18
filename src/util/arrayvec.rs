@@ -182,10 +182,20 @@ impl<const N: usize, T: Sized> ArrayVec<N, T> {
 }
 
 impl<const N: usize, T: Sized + Ord> ArrayVec<N, T> {
-    /// Sort in-place using [selection sort](https://en.m.wikipedia.org/wiki/Selection_sort).
+    /// Sort in-place.
     ///
-    /// This algorithm is more effective for small-sized arrays.
-    pub fn selection_sort(&mut self) {
+    /// "Unstable" does not guarantee the order of equal elements.
+    pub fn sort_unstable(&mut self) {
+        self.sort_unstable_by(|a, b| a.cmp(b))
+    }
+
+    /// Sort in-place using a comparison function.
+    ///
+    /// "Unstable" does not guarantee the order of equal elements.
+    pub fn sort_unstable_by<F>(&mut self, mut compare: F)
+    where
+        F: FnMut(&T, &T) -> std::cmp::Ordering,
+    {
         if self.len == 0 {
             return;
         }
@@ -193,7 +203,7 @@ impl<const N: usize, T: Sized + Ord> ArrayVec<N, T> {
         for i in 0..(self.len - 1) {
             let mut min_idx = i;
             for j in (i + 1)..(self.len) {
-                if self[j] < self[min_idx] {
+                if matches!(compare(&self[j], &self[min_idx]), std::cmp::Ordering::Less) {
                     min_idx = j;
                 }
             }
@@ -201,6 +211,17 @@ impl<const N: usize, T: Sized + Ord> ArrayVec<N, T> {
                 self.swap(i, min_idx);
             }
         }
+    }
+
+    /// Sort in-place using a function to extract the value of each element.
+    ///
+    /// "Unstable" does not guarantee the order of equal elements.
+    pub fn sort_unstable_by_key<F, K>(&mut self, mut f: F)
+    where
+        F: FnMut(&T) -> K,
+        K: Ord,
+    {
+        self.sort_unstable_by(|a, b| f(a).cmp(&f(b)))
     }
 }
 
@@ -402,16 +423,35 @@ mod tests {
         ];
         for tc in test_cases {
             eprintln!("tc: {:?}", tc);
-            let mut av = ArrayVec::<512, usize>::new();
-            let mut v: Vec<usize> = tc;
+            let mut av = ArrayVec::<512, i32>::new();
+            let mut v: Vec<i32> = tc;
             for &n in v.iter() {
                 av.push(n);
             }
 
-            av.selection_sort();
-            v.sort();
-            let res = av.into_iter().collect::<Vec<_>>();
-            assert_eq!(res, v);
+            av.sort_unstable();
+            v.sort_unstable();
+            let res = av.iter().cloned().collect::<Vec<_>>();
+            assert_eq!(res, v, "failed sort unstable");
+
+            use std::cmp::Ordering;
+            fn gt(a: &i32, b: &i32) -> Ordering {
+                match a.cmp(b) {
+                    Ordering::Less => Ordering::Greater,
+                    Ordering::Equal => Ordering::Equal,
+                    Ordering::Greater => Ordering::Less,
+                }
+            }
+
+            av.sort_unstable_by(gt);
+            v.sort_unstable_by(gt);
+            let res = av.iter().cloned().collect::<Vec<_>>();
+            assert_eq!(res, v, "failed sort unstable by");
+
+            av.sort_unstable_by_key(|x| -x);
+            v.sort_unstable_by_key(|x| -x);
+            let res = av.iter().cloned().collect::<Vec<_>>();
+            assert_eq!(res, v, "failed sort unstable by key");
         }
     }
 

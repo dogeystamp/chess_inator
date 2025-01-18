@@ -23,7 +23,7 @@ use crate::{
 use std::ops::Not;
 
 /// Max moves that can be stored per position.
-const MAX_MOVES: usize = 256;
+pub const MAX_MOVES: usize = 256;
 
 /// Internal type alias to help switch vector types easier
 pub type MoveList = ArrayVec<MAX_MOVES, Move>;

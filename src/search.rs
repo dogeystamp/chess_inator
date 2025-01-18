@@ -15,10 +15,10 @@ Copyright © 2024 dogeystamp <dogeystamp@disroot.org>
 
 use crate::hash::ZobristTable;
 use crate::prelude::*;
+use crate::util::arrayvec::ArrayVec;
 use std::cmp::min;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
-use crate::util::arrayvec::ArrayVec;
 
 // a bit less than int max, as a safety margin
 const EVAL_BEST: EvalInt = EvalInt::MAX - 3;
@@ -223,7 +223,11 @@ struct MinmaxState {
 /// # Returns
 ///
 /// The best move, and its corresponding absolute eval for the current player.
-fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Option<Move>, SearchEval) {
+fn minmax(
+    board: &mut Board,
+    state: &mut EngineState,
+    mm: MinmaxState,
+) -> (Option<Move>, SearchEval) {
     // occasionally check if we should stop the engine
     let interrupt_cycle = match state.interrupts {
         InterruptMode::Normal => Some(1 << 16),
@@ -341,8 +345,7 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Optio
         MoveGenerator::None => MoveList::new(),
     };
 
-    // TODO: arrayvec
-    let mut mvs: Vec<_> = mvs
+    let mut mvs: ArrayVec<{ crate::movegen::MAX_MOVES }, _> = mvs
         .into_iter()
         .map(|mv| (move_priority(board, &mv, state), mv))
         .collect();
@@ -768,7 +771,7 @@ pub type PVStack = ArrayVec<MAX_PV, Move>;
 /// # Arguments
 ///
 /// * `board`: Position to find best moves from.
-/// * `stack`: 
+/// * `stack`:
 pub fn probe_pv(board: &mut Board, state: &mut EngineState, stack: &mut PVStack) {
     if stack.is_full() {
         // maximum attained
