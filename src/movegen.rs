@@ -22,8 +22,8 @@ use crate::{
 };
 use std::ops::Not;
 
-/// Most moves possible (to store) in a single position.
-const MAX_MOVES: usize = 192;
+/// Max moves that can be stored per position.
+const MAX_MOVES: usize = 256;
 
 /// Internal type alias to help switch vector types easier
 pub type MoveList = ArrayVec<MAX_MOVES, Move>;
@@ -649,7 +649,7 @@ pub trait GenAttackers {
         dest: Square,
         single: bool,
         filter_color: Option<Color>,
-    ) -> impl IntoIterator<Item = (ColPiece, Move)>;
+    ) -> ArrayVec<MAX_MOVES, (ColPiece, Move)>;
 }
 
 impl GenAttackers for Board {
@@ -658,7 +658,7 @@ impl GenAttackers for Board {
         dest: Square,
         single: bool,
         filter_color: Option<Color>,
-    ) -> impl IntoIterator<Item = (ColPiece, Move)> {
+    ) -> ArrayVec<MAX_MOVES, (ColPiece, Move)> {
         let mut ret: ArrayVec<MAX_MOVES, (ColPiece, Move)> = ArrayVec::new();
 
         /// Filter attackers and add them to the return vector.

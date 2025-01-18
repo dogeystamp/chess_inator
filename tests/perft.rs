@@ -24,8 +24,10 @@ fn test_perft() {
     // https://www.chessprogramming.org/Perft_Results
     let test_cases = [
         (
-            "QQqQqQqq/q6Q/Q6q/q6Q/Q6q/q6Q/Q6q/QqQqQqQq w - - 0 1",
-            vec![1, 412],
+            // https://chess.stackexchange.com/a/8392
+            // test case intended to test what happens when moving HybridVec from stack to heap
+            "R6R/3Q4/1Q4Q1/4Q3/2Q4Q/Q4Q2/pp1Q4/kBNN1KB1 w - - 0 1",
+            vec![1, 218],
             1,
         ),
         (

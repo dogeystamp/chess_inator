@@ -48,6 +48,11 @@ impl<const N: usize, T: Sized> ArrayVec<N, T> {
         N
     }
 
+    /// If true, can't push any more elements to this vector.
+    pub fn is_full(&self) -> bool {
+        self.len() == N
+    }
+
     /// Get the number of elements currently in the vector.
     pub fn len(&self) -> usize {
         self.len
@@ -96,7 +101,7 @@ impl<const N: usize, T: Sized> ArrayVec<N, T> {
         Ok(())
     }
 
-    /// Pushes one element to the end of the vector.
+    /// Appends one element to the end of the vector.
     ///
     /// ***Panics*** if the capacity is exceeded, but only through a debug assertion.
     pub fn push(&mut self, x: T) {
@@ -160,9 +165,14 @@ impl<const N: usize, T: Sized> ArrayVec<N, T> {
             std::ptr::swap(pa, pb);
         }
     }
+
+    /// Immutable reference iterator over this vector.
+    pub fn iter(&self) -> ArrayVecIter<'_, N, T> {
+        ArrayVecIter { arr: self, i: 0 }
+    }
 }
 
-impl<const N: usize, T: Sized + PartialOrd> ArrayVec<N, T> {
+impl<const N: usize, T: Sized + Ord> ArrayVec<N, T> {
     /// Sort in-place using [selection sort](https://en.m.wikipedia.org/wiki/Selection_sort).
     ///
     /// This algorithm is more effective for small-sized arrays.
@@ -253,6 +263,25 @@ impl<const N: usize, T: Sized> Iterator for ArrayVecIntoIter<N, T> {
                 self.i += 1;
                 ret
             }
+        } else {
+            None
+        }
+    }
+}
+
+pub struct ArrayVecIter<'a, const N: usize, T: Sized> {
+    arr: &'a ArrayVec<N, T>,
+    i: usize,
+}
+
+impl<'a, const N: usize, T> Iterator for ArrayVecIter<'a, N, T> {
+    type Item = &'a T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if (0..self.arr.len).contains(&self.i) {
+            let ret = Some(&self.arr[self.i]);
+            self.i += 1;
+            ret
         } else {
             None
         }

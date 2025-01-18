@@ -15,4 +15,5 @@ Copyright © 2025 dogeystamp <dogeystamp@disroot.org>
 
 pub mod serialization;
 pub mod arrayvec;
+pub mod hybridvec;
 pub mod random;
