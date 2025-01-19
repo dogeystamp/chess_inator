@@ -75,6 +75,7 @@ impl FromFen for Board {
         }
 
         let mut pos = Board::default();
+        let mut full_moves = 0;
 
         let mut parser_state = FenState::Piece(0, 0);
         let mut next_state = FenState::Space;
@@ -213,11 +214,11 @@ impl FromFen for Board {
                 }
                 FenState::HalfMove => {
                     if let Some(digit) = c.to_digit(10) {
-                        if pos.half_moves > Board::MAX_MOVES {
+                        if pos.irreversible_half > Board::MAX_MOVES {
                             return Err(FenError::TooManyMoves);
                         }
-                        pos.half_moves *= 10;
-                        pos.half_moves += digit as usize;
+                        pos.irreversible_half *= 10;
+                        pos.irreversible_half += digit as usize;
                     } else if c == ' ' {
                         parser_state = FenState::FullMove;
                     } else {
@@ -226,11 +227,11 @@ impl FromFen for Board {
                 }
                 FenState::FullMove => {
                     if let Some(digit) = c.to_digit(10) {
-                        if pos.half_moves > Board::MAX_MOVES {
+                        if pos.irreversible_half > Board::MAX_MOVES {
                             return Err(FenError::TooManyMoves);
                         }
-                        pos.full_moves *= 10;
-                        pos.full_moves += digit as usize;
+                        full_moves *= 10;
+                        full_moves += digit as usize;
                     } else {
                         return bad_char!(i, c);
                     }
@@ -241,6 +242,11 @@ impl FromFen for Board {
         // parser is always ready to receive another full move digit,
         // so there is no real "stop" state
         if matches!(parser_state, FenState::FullMove) {
+            pos.plies = full_moves * 2
+                + match pos.turn {
+                    Color::White => 0,
+                    Color::Black => 1,
+                };
             Zobrist::toggle_board_info(&mut pos);
             Ok(pos)
         } else {
@@ -286,8 +292,8 @@ impl ToFen for Board {
             Some(sqr) => sqr.to_string(),
             None => "-".to_string(),
         };
-        let half_move = self.half_moves.to_string();
-        let full_move = self.full_moves.to_string();
+        let half_move = self.irreversible_half.to_string();
+        let full_move = (self.plies / 2).to_string();
 
         format!("{pieces_str} {turn} {castle} {ep_square} {half_move} {full_move}")
     }
@@ -405,8 +411,8 @@ mod tests {
     fn test_fen_half_move_counter() {
         for i in 0..=Board::MAX_MOVES {
             let board = make_board!("8/8/8/8/8/8/8/8 w - - {i} 0");
-            assert_eq!(board.half_moves, i);
-            assert_eq!(board.full_moves, 0);
+            assert_eq!(board.irreversible_half, i);
+            assert_eq!(board.plies, 0);
         }
     }
 
@@ -414,8 +420,11 @@ mod tests {
     fn test_fen_move_counter() {
         for i in 0..=Board::MAX_MOVES {
             let board = make_board!("8/8/8/8/8/8/8/8 w - - 0 {i}");
-            assert_eq!(board.half_moves, 0);
-            assert_eq!(board.full_moves, i);
+            assert_eq!(board.irreversible_half, 0);
+            assert_eq!(board.plies, i * 2);
+            let board = make_board!("8/8/8/8/8/8/8/8 b - - 0 {i}");
+            assert_eq!(board.irreversible_half, 0);
+            assert_eq!(board.plies, i * 2 + 1);
         }
     }
 

@@ -615,6 +615,41 @@ impl BoardHistory {
     }
 }
 
+/// Information to reverse a null-move.
+pub struct AntiNullMove {
+    /// En-passant target square prior to the null-move.
+    ep_square: Option<Square>,
+}
+
+/// Extra information about the board.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub struct BoardInformation {
+    /// Number of minor and major pieces, i.e. queens rooks bishops and knights.
+    n_min_maj_pcs: u8,
+}
+
+impl BoardInformation {
+    pub fn add_piece(&mut self, pc: ColPiece, _sq: Square) {
+        use Piece::*;
+        match pc.pc {
+            Queen | Rook | Bishop | Knight => {
+                self.n_min_maj_pcs += 1
+            }
+            _ => {}
+        }
+    }
+
+    pub fn del_piece(&mut self, pc: ColPiece, _sq: Square) {
+        use Piece::*;
+        match pc.pc {
+            Queen | Rook | Bishop | Knight => {
+                self.n_min_maj_pcs -= 1
+            }
+            _ => {}
+        }
+    }
+}
+
 /// Game state, describes a position.
 ///
 /// Default is empty.
@@ -638,10 +673,10 @@ pub struct Board {
     castle: CastleRights,
 
     /// Plies since last irreversible (capture, pawn) move
-    half_moves: usize,
+    irreversible_half: usize,
 
-    /// Full move counter (incremented after each black turn)
-    full_moves: usize,
+    /// Half-moves in total in this game (one white move, then black move, is two half moves)
+    plies: usize,
 
     /// Whose turn it is
     turn: Color,
@@ -657,6 +692,9 @@ pub struct Board {
 
     /// History of recent hashes to avoid repetition draws.
     history: BoardHistory,
+
+    /// Extra information that is maintained.
+    info: BoardInformation,
 }
 
 impl Board {
@@ -673,7 +711,7 @@ impl Board {
     /// Is this position a draw by three repetitions?
     pub fn is_repetition(&mut self) -> bool {
         self.history
-            .at_least_in_recent(2, self.half_moves, self.zobrist)
+            .at_least_in_recent(2, self.irreversible_half, self.zobrist)
     }
 
     /// Get iterator over all squares.
@@ -684,11 +722,47 @@ impl Board {
     /// Get the 8th rank from a given player's perspective.
     ///
     /// Useful for promotions.
-    pub fn last_rank(pl: Color) -> usize {
+    pub const fn last_rank(pl: Color) -> usize {
         match pl {
-            Color::White => usize::from(BOARD_HEIGHT) - 1,
+            Color::White => BOARD_HEIGHT - 1,
             Color::Black => 0,
         }
+    }
+
+    /// Get the 5th rank from a given player's perspective.
+    ///
+    /// Useful for en-passant validity.
+    pub const fn ep_rank(pl: Color) -> usize {
+        match pl {
+            Color::White => BOARD_HEIGHT - 4,
+            Color::Black => 3,
+        }
+    }
+
+    /// Have the current player pass their turn.
+    ///
+    /// Equivalent to flipping the board's turn.
+    pub fn make_null_move(&mut self) -> AntiNullMove {
+        self.zobrist.toggle_turn(self.turn);
+        self.turn = self.turn.flip();
+        self.zobrist.toggle_turn(self.turn);
+        let ret = AntiNullMove {
+            ep_square: self.ep_square,
+        };
+        self.zobrist.toggle_ep(self.ep_square);
+        self.ep_square = None;
+        self.plies += 1;
+        ret
+    }
+
+    /// Undo a null move (see [`Board.null_move`](Self#method.null_move)).
+    pub fn unmake_null_move(&mut self, anti_mv: AntiNullMove) {
+        self.zobrist.toggle_turn(self.turn);
+        self.turn = self.turn.flip();
+        self.plies -= 1;
+        self.zobrist.toggle_turn(self.turn);
+        self.ep_square = anti_mv.ep_square;
+        self.zobrist.toggle_ep(self.ep_square);
     }
 
     /// Create a new piece in a location, and pop any existing piece in the destination.
@@ -704,6 +778,7 @@ impl Board {
         *self.mail.sq_mut(sq) = Some(pc);
         if update_metrics {
             self.nnue.add_piece(pc, sq);
+            self.info.add_piece(pc, sq);
             self.zobrist.toggle_pc(&pc, &sq);
         }
         dest_pc
@@ -730,6 +805,7 @@ impl Board {
             *self.mail.sq_mut(sq) = None;
             if update_metrics {
                 self.nnue.del_piece(pc, sq);
+                self.info.del_piece(pc, sq);
                 self.zobrist.toggle_pc(&pc, &sq);
             }
             Some(pc)
@@ -759,8 +835,8 @@ impl Board {
     pub fn flip_colors(&self) -> Self {
         let mut new_board = Self {
             turn: self.turn.flip(),
-            half_moves: self.half_moves,
-            full_moves: self.full_moves,
+            irreversible_half: self.irreversible_half,
+            plies: self.plies ^ 1,
             ep_square: self.ep_square.map(|sq| sq.mirror_vert()),
             castle: CastleRights(self.castle.0),
             zobrist: Zobrist::default(),
@@ -1140,5 +1216,65 @@ mod tests {
 
         let (_line, eval) = best_line(&mut board, &mut engine_state);
         assert!(EvalInt::from(eval) < 0);
+    }
+
+    #[test]
+    fn null_move() {
+        let mut board = Board::starting_pos();
+        let anti_mv = board.make_null_move();
+        let anti_mv2 = Move::from_uci_algebraic("e7e5").unwrap().make(&mut board);
+        anti_mv2.unmake(&mut board);
+        board.unmake_null_move(anti_mv);
+        assert_eq!(board, Board::starting_pos());
+    }
+
+    #[test]
+    fn min_maj_pcs() {
+        let test_cases = [
+            (
+                // board
+                "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+                // a pseudo-legal move to test on the board
+                "e2e4",
+                // expected min/maj piece count after the move
+                14,
+            ),
+            (
+                "8/8/8/3Q4/3k4/8/8/8 b - - 0 1",
+                "d4d5",
+                0,
+            ),
+            (
+                "8/8/8/3Q4/3k4/8/8/8 b - - 0 1",
+                "d4e3",
+                1,
+            ),
+            (
+                "8/8/8/3Q4/3kp3/8/8/8 b - - 0 1",
+                "d4e3",
+                1,
+            ),
+            (
+                "8/8/8/3Q4/3kp3/8/8/8 b - - 0 1",
+                "e4d5",
+                0,
+            ),
+            (
+                "8/8/8/3Qq3/3kp3/8/8/8 b - - 0 1",
+                "e5d5",
+                1,
+            ),
+            (
+                "8/8/8/3Qq3/3kp3/8/8/8 b - - 0 1",
+                "e5d6",
+                2,
+            ),
+        ];
+        for (fen, mv, expected) in test_cases {
+            let mut board = Board::from_fen(fen).unwrap();
+            let mv = Move::from_uci_algebraic(mv).unwrap();
+            mv.make(&mut board);
+            assert_eq!(board.info.n_min_maj_pcs, expected, "failed '{}'", fen)
+        }
     }
 }

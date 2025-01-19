@@ -205,6 +205,8 @@ struct MinmaxState {
     beta: Option<EvalInt>,
     /// quiescence search flag
     quiesce: bool,
+    /// flag to prevent consecutive null moves
+    allow_null_mv: bool,
 
     node_type: NodeType,
 }
@@ -298,12 +300,14 @@ fn minmax(
                     alpha: mm.alpha,
                     beta: mm.beta,
                     quiesce: true,
+                    allow_null_mv: true,
                     node_type: mm.node_type,
                 },
             );
         }
     }
 
+    #[derive(Debug)]
     enum MoveGenerator {
         /// Use heavily pruned search to generate moves leading to a quiet position.
         Quiescence,
@@ -339,6 +343,74 @@ fn minmax(
         }
     }
 
+    let is_pv = matches!(mm.node_type, NodeType::PV);
+
+    // true in a pv node, until we find a move that raises alpha. then, it becomes false.
+    let mut is_next_pv = is_pv;
+
+    // default to worst, then gradually improve
+    let mut alpha = mm.alpha.unwrap_or(EVAL_WORST);
+    // our best is their worst
+    let beta = mm.beta.unwrap_or(EVAL_BEST);
+
+    // R parameter
+    const NULL_MOVE_REDUCTION: usize = 4;
+
+    // conditions to perform null move pruning:
+    let do_null_move = mm.allow_null_mv
+        // prevent going to negative depth
+        && mm.depth > NULL_MOVE_REDUCTION
+        // quiescence is already reduced, so don't reduce it further
+        && !mm.quiesce
+        // zugzwang happens mostly during king-pawn endgames. zugzwang is when passing our turn
+        // would be a disadvantage for the opponent, thus we can't prune that using null moves.
+        && board.info.n_min_maj_pcs > 0
+        // null move while in check leads to the king getting captured; no need to verify that
+        && !is_in_check;
+
+    // doing nothing is generally very good for the opponent.
+    // if we do a null move, and the opponent can't beat their current best score (beta),
+    // then we consider that our best real move is not worse.
+    if do_null_move {
+        let anti_mv = board.make_null_move();
+        let (_, score) = minmax(
+            board,
+            state,
+            MinmaxState {
+                depth: mm.depth - NULL_MOVE_REDUCTION - 1,
+                // null window around beta: our opponent tries to beat their current best
+                alpha: Some(-beta),
+                beta: Some(-beta + 1),
+                quiesce: mm.quiesce,
+                allow_null_mv: false,
+                node_type: if is_next_pv {
+                    NodeType::PV
+                } else {
+                    NodeType::NonPV
+                },
+            },
+        );
+        board.unmake_null_move(anti_mv);
+
+        // propagate hard stops
+        if matches!(score, SearchEval::Stopped) {
+            return (None, SearchEval::Stopped);
+        }
+
+        let abs_score = score.increment();
+        let score_int = EvalInt::from(abs_score);
+
+        if score_int >= beta {
+            // beta cutoff
+            return (None, abs_score);
+        }
+
+        if score_int > alpha {
+            // raise alpha
+            alpha = score_int;
+        }
+    }
+
     let mvs = match move_generator {
         MoveGenerator::Quiescence => board.gen_captures(),
         MoveGenerator::Normal => board.gen_moves(),
@@ -356,11 +428,6 @@ fn minmax(
 
     // sort moves by decreasing priority
     mvs.sort_unstable_by_key(|mv| -mv.0);
-
-    // default to worst, then gradually improve
-    let mut alpha = mm.alpha.unwrap_or(EVAL_WORST);
-    // our best is their worst
-    let beta = mm.beta.unwrap_or(EVAL_BEST);
 
     let mut abs_best = SearchEval::Exact(EVAL_WORST);
 
@@ -396,14 +463,11 @@ fn minmax(
         }
     }
 
-    // true in a pv node, until we find a move that raises alpha. then, it becomes false.
-    let mut is_pv = matches!(mm.node_type, NodeType::PV);
-
     for (_priority, mv) in mvs {
         let anti_mv = mv.make(board);
 
         // only use null window when we have move ordering through the transposition table
-        let do_null_window = !is_pv && trans_table_move.is_some() && mm.depth > 2;
+        let do_null_window = !is_next_pv && trans_table_move.is_some() && mm.depth > 2;
 
         let new_depth = mm.depth - if do_extension { 0 } else { 1 };
 
@@ -415,7 +479,13 @@ fn minmax(
                 alpha: Some(if do_null_window { -(alpha + 1) } else { -beta }),
                 beta: Some(-alpha),
                 quiesce: mm.quiesce,
-                node_type: if is_pv { NodeType::PV } else { NodeType::NonPV },
+                // if we're doing null window, we really just want to prune the move
+                allow_null_mv: do_null_window,
+                node_type: if is_next_pv {
+                    NodeType::PV
+                } else {
+                    NodeType::NonPV
+                },
             },
         );
 
@@ -433,6 +503,7 @@ fn minmax(
                             alpha: Some(-beta),
                             beta: Some(-alpha),
                             quiesce: mm.quiesce,
+                            allow_null_mv: true,
                             node_type: NodeType::PV,
                         },
                     );
@@ -454,7 +525,7 @@ fn minmax(
         }
         if EvalInt::from(abs_best) > alpha {
             alpha = abs_best.into();
-            is_pv = false;
+            is_next_pv = false;
         }
         if alpha >= beta && state.config.alpha_beta_on {
             // alpha-beta prune.
@@ -475,11 +546,6 @@ fn minmax(
     }
 
     if let Some(best_move) = best_move {
-        let half_move = (board.full_moves as u8).wrapping_mul(2)
-            + match board.turn {
-                Color::White => 0,
-                Color::Black => 1,
-            };
         if state.config.enable_trans_table {
             state.cache.save_entry(
                 board.zobrist,
@@ -489,7 +555,7 @@ fn minmax(
                     depth: u8::try_from(mm.depth).unwrap(),
                     is_qsearch: mm.quiesce,
                     // `as u8` will wrap around to 0, but that's accounted for
-                    age: half_move,
+                    age: board.plies as u8,
                     node_type: mm.node_type,
                 },
             );
@@ -613,6 +679,7 @@ fn iter_deep(board: &mut Board, state: &mut EngineState) -> (Option<Move>, Searc
             alpha: None,
             beta: None,
             quiesce: false,
+            allow_null_mv: false,
             node_type: NodeType::PV,
         },
     );
@@ -635,6 +702,7 @@ fn iter_deep(board: &mut Board, state: &mut EngineState) -> (Option<Move>, Searc
                 alpha: None,
                 beta: None,
                 quiesce: false,
+                allow_null_mv: false,
                 node_type: NodeType::PV,
             },
         );
@@ -674,7 +742,7 @@ impl TimeLimits {
         let mut soft_ms = 1_500;
 
         // in some situations we can think longer
-        if board.full_moves >= 6 {
+        if board.plies >= 12 {
             soft_ms = if ourtime_ms > 300_000 {
                 3_000
             } else if ourtime_ms > 600_000 {
@@ -859,6 +927,12 @@ mod tests {
                 .unwrap();
         let orig_board = board;
         let (_line, _eval) = best_line(&mut board, &mut engine_state);
-        assert_eq!(board, orig_board)
+        assert_eq!(
+            board,
+            orig_board,
+            "failed eq: '{}' vs '{}'",
+            orig_board.to_fen(),
+            board.to_fen()
+        )
     }
 }

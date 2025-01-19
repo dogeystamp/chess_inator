@@ -121,7 +121,7 @@ impl AntiMove {
         }
 
         pos.move_piece(self.dest, self.src, update_metrics);
-        pos.half_moves = self.half_moves;
+        pos.irreversible_half = self.half_moves;
         pos.castle = self.castle;
         pos.ep_square = self.ep_square;
 
@@ -142,9 +142,7 @@ impl AntiMove {
         }
 
         pos.turn = pos.turn.flip();
-        if pos.turn == Color::Black {
-            pos.full_moves -= 1;
-        }
+        pos.plies -= 1;
 
         match self.move_type {
             AntiMoveType::Normal => {
@@ -216,7 +214,7 @@ impl Move {
             src: self.src,
             cap: None,
             move_type: AntiMoveType::Normal,
-            half_moves: pos.half_moves,
+            half_moves: pos.irreversible_half,
             castle: pos.castle,
             ep_square: pos.ep_square,
         };
@@ -230,9 +228,7 @@ impl Move {
         let ep_square = pos.ep_square;
         pos.ep_square = None;
 
-        if pos.turn == Color::Black {
-            pos.full_moves += 1;
-        }
+        pos.plies += 1;
 
         /// Get the piece at the source square.
         macro_rules! pc_src {
@@ -262,7 +258,7 @@ impl Move {
                 pc_asserts!(pc_src);
                 debug_assert_eq!(pc_src.pc, Piece::Pawn);
 
-                pos.half_moves = 0;
+                pos.irreversible_half = 0;
 
                 anti_move.move_type = AntiMoveType::Promotion;
 
@@ -289,7 +285,7 @@ impl Move {
 
                 if matches!(pc_src.pc, Piece::Pawn) {
                     // pawn moves are irreversible
-                    pos.half_moves = 0;
+                    pos.irreversible_half = 0;
 
                     // set en-passant target square
                     if src_row.abs_diff(dest_row) == 2 {
@@ -336,12 +332,12 @@ impl Move {
                         }
                     }
                 } else {
-                    pos.half_moves += 1;
+                    pos.irreversible_half += 1;
                 }
 
                 if pc_dest.is_some() {
                     // captures are irreversible
-                    pos.half_moves = 0;
+                    pos.irreversible_half = 0;
                 }
 
                 let castle = &mut pos.castle[pc_src.col];
@@ -1103,6 +1099,7 @@ impl MoveGenInternal for Board {
             let (r, c) = src.to_row_col_signed();
 
             let last_row = isize::try_from(Board::last_rank(self.turn)).unwrap();
+            let ep_row = isize::try_from(Board::ep_rank(self.turn)).unwrap();
 
             let nr = r + isize::from(self.turn.sign());
             let is_promotion = nr == last_row;
@@ -1135,7 +1132,7 @@ impl MoveGenInternal for Board {
                     Ok(sq) => sq,
                     Err(_) => continue,
                 };
-                if self.get_piece(dest).is_some() || self.ep_square == Some(dest) {
+                if self.get_piece(dest).is_some() || (r == ep_row && self.ep_square == Some(dest)) {
                     push_moves!(src, dest);
                 }
             }

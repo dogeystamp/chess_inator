@@ -269,8 +269,8 @@ mod tests {
                 let mv = Move::from_uci_algebraic(mv_str).unwrap();
                 mv.make(&mut pos);
             }
-            pos.half_moves = pos_orig.half_moves;
-            pos.full_moves = pos_orig.full_moves;
+            pos.irreversible_half = pos_orig.irreversible_half;
+            pos.plies = pos_orig.plies;
             assert_eq!(
                 pos, pos_orig,
                 "test case is incorrect, position should loop back to the original"
