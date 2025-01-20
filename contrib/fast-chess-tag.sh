@@ -6,7 +6,7 @@
 # Example usage:
 #
 #	 cd chess_tournaments
-#	 fast-chess-tag.sh quiescence no-quiescence -openings file=8moves_v3.pgn format=pgn order=random -each tc=300+0.1 -rounds 12 -repeat -concurrency 8 -recover -sprt elo0=0 elo1=10 alpha=0.05 beta=0.05
+#	 fast-chess-tag.sh quiescence no-quiescence -openings file=8moves_v3.pgn format=pgn order=random -each tc=8+0.08 -rounds 1200 -repeat -concurrency 8 -recover -sprt elo0=0 elo1=10 alpha=0.05 beta=0.05
 #
 # You need to be in a chess_inator Git repository to run this script. Ensure
 # that the repository you're in is a throw-away worktree. Create one using:
@@ -30,14 +30,18 @@
 # 	curl -O https://github.com/official-stockfish/books/raw/refs/heads/master/8moves_v3.pgn.zip
 #
 # The sprt mode is a statistical hypothesis testing mode that will tell you how
-# probably the first branch is better than the second branch. The Elo ratings
-# given are the "indifference zone" where the result is acceptable. To check
-# that the engine hasn't had a regression, set them to [-10, 0]. To check for
-# an improvement, use [0, 10]. Alpha and beta are probabilities for statistical
-# errors. The tournament automatically ends when a statistically significant
-# result is obtained.
+# probably the first tag is better than the second tag. To check that the
+# engine hasn't had a regression, set the Elo bounds to them to [-10, 0]. To
+# check for an improvement, use [0, 10]. Alpha and beta are probabilities for
+# statistical errors. The tournament automatically ends when a statistically
+# significant result is obtained.
 #
-# LOS stands for "likelihood of superiority", LLR "log likelihood ratio".
+# LLR stands for "log likelihood ratio", and when it reaches one of the bounds,
+# the SPRT concludes. A negative LLR indicates that your hypothesis is wrong,
+# while a positive indicates your hypothesis (usually that your new version is
+# better, or not worse than the last one) is right. If the LLR is between the
+# bounds when the match ends, then the result is not statistically significant.
+# This means you need a larger sample size.
 #
 # By default, a PGN file will be exported with the games played, and the
 # fast-chess SPRT output will be appended. This comment may interfere with
