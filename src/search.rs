@@ -24,6 +24,12 @@ use std::time::{Duration, Instant};
 const EVAL_BEST: EvalInt = EvalInt::MAX - 3;
 const EVAL_WORST: EvalInt = -(EVAL_BEST);
 
+/// Maximum number of plies to search per search.
+pub const MAX_PLY: usize = 128;
+
+/// Number of moves to keep in the killer moves table
+const KILLER_TABLE_MOVES: usize = 2;
+
 #[cfg(test)]
 mod test_eval_int {
     use super::*;
@@ -165,7 +171,12 @@ fn lvv_mva_eval(src_pc: Piece, cap_pc: Piece) -> EvalInt {
 }
 
 /// Assign a priority to a move based on how promising it is.
-fn move_priority(board: &mut Board, mv: &Move, state: &mut EngineState) -> EvalInt {
+fn move_priority(
+    board: &mut Board,
+    mm: &MinmaxState,
+    mv: &Move,
+    state: &mut EngineState,
+) -> EvalInt {
     // move eval
     let mut eval: EvalInt = 0;
     let src_pc = board.get_piece(mv.src).unwrap();
@@ -174,12 +185,15 @@ fn move_priority(board: &mut Board, mv: &Move, state: &mut EngineState) -> EvalI
     if state.config.enable_trans_table {
         if let Some(entry) = &state.cache[board.zobrist] {
             eval = entry.eval.into();
+        } else if state.killer_table.probe(mv, mm.plies) {
+            eval = 10000;
         }
     } else if let Some(cap_pc) = anti_mv.cap {
         // least valuable victim, most valuable attacker
-        // penalized to prioritize transposition table moves
-        eval += lvv_mva_eval(src_pc.into(), cap_pc) - 1000
+        eval += lvv_mva_eval(src_pc.into(), cap_pc)
     }
+
+    // TODO: use lvv mva when there is no transposition entry
 
     anti_mv.unmake(board);
 
@@ -197,8 +211,10 @@ enum NodeType {
 
 /// State specifically for a minmax call.
 struct MinmaxState {
-    /// how many plies left to search in this call
+    /// how many plies deep this call will search
     depth: usize,
+    /// how many plies have been searched so far before this call
+    plies: usize,
     /// best score (absolute, from current player perspective) guaranteed for current player.
     alpha: Option<EvalInt>,
     /// best score (absolute, from current player perspective) guaranteed for other player.
@@ -299,6 +315,7 @@ fn minmax(
                     depth: state.config.qdepth,
                     alpha: mm.alpha,
                     beta: mm.beta,
+                    plies: mm.plies + 1,
                     quiesce: true,
                     allow_null_mv: true,
                     node_type: mm.node_type,
@@ -381,6 +398,7 @@ fn minmax(
                 // null window around beta: our opponent tries to beat their current best
                 alpha: Some(-beta),
                 beta: Some(-beta + 1),
+                plies: mm.plies + 1,
                 quiesce: mm.quiesce,
                 allow_null_mv: false,
                 node_type: if is_next_pv {
@@ -402,6 +420,7 @@ fn minmax(
 
         if score_int >= beta {
             // beta cutoff
+            // TODO: possibly do transposition table logic too
             return (None, abs_score);
         }
 
@@ -419,7 +438,7 @@ fn minmax(
 
     let mut mvs: ArrayVec<{ crate::movegen::MAX_MOVES }, _> = mvs
         .into_iter()
-        .map(|mv| (move_priority(board, &mv, state), mv))
+        .map(|mv| (move_priority(board, &mm, &mv, state), mv))
         .collect();
 
     if let Some(trans_table_move) = trans_table_move {
@@ -478,6 +497,7 @@ fn minmax(
                 depth: new_depth,
                 alpha: Some(if do_null_window { -(alpha + 1) } else { -beta }),
                 beta: Some(-alpha),
+                plies: mm.plies + 1,
                 quiesce: mm.quiesce,
                 // if we're doing null window, we really just want to prune the move
                 allow_null_mv: do_null_window,
@@ -502,6 +522,7 @@ fn minmax(
                             depth: new_depth,
                             alpha: Some(-beta),
                             beta: Some(-alpha),
+                            plies: mm.plies + 1,
                             quiesce: mm.quiesce,
                             allow_null_mv: true,
                             node_type: NodeType::PV,
@@ -537,6 +558,7 @@ fn minmax(
             if let SearchEval::Upper(eval) | SearchEval::Exact(eval) = abs_best {
                 abs_best = SearchEval::Lower(eval);
             }
+            state.killer_table.write_mv(mv, mm.plies);
             break;
         }
     }
@@ -669,6 +691,9 @@ pub type TranspositionTable = ZobristTable<TranspositionEntry>;
 
 /// Iteratively deepen search until it is stopped.
 fn iter_deep(board: &mut Board, state: &mut EngineState) -> (Option<Move>, SearchEval) {
+    // wipe the table
+    state.killer_table = KillerMoves::new();
+
     state.interrupts = InterruptMode::MustComplete;
 
     let (mut prev_move, mut prev_eval) = minmax(
@@ -678,6 +703,7 @@ fn iter_deep(board: &mut Board, state: &mut EngineState) -> (Option<Move>, Searc
             depth: 1,
             alpha: None,
             beta: None,
+            plies: 0,
             quiesce: false,
             allow_null_mv: false,
             node_type: NodeType::PV,
@@ -701,6 +727,7 @@ fn iter_deep(board: &mut Board, state: &mut EngineState) -> (Option<Move>, Searc
                 depth,
                 alpha: None,
                 beta: None,
+                plies: 0,
                 quiesce: false,
                 allow_null_mv: false,
                 node_type: NodeType::PV,
@@ -788,6 +815,52 @@ pub enum InterruptMode {
     Normal,
 }
 
+/// Killer move heuristic data.
+///
+/// `N` is the amount of moves to store per ply.
+pub struct KillerMoves<const N: usize> {
+    mvs: [[Option<Move>; N]; MAX_PLY],
+}
+
+impl<const N: usize> KillerMoves<N> {
+    pub fn new() -> Self {
+        KillerMoves {
+            mvs: [[None; N]; MAX_PLY],
+        }
+    }
+
+    /// Check if this move is a killer move for this ply.
+    fn probe(&self, mv: &Move, ply: usize) -> bool {
+        for k_mv in self.mvs[ply].into_iter().flatten() {
+            if k_mv == *mv {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Insert a move into the killer move table.
+    /// Does not duplicate moves.
+    fn write_mv(&mut self, mv: Move, ply: usize) {
+        // offset moves to make space (possibly overwrite later moves)
+        if let Some(existing_mv) = self.mvs[ply][0] {
+            if existing_mv == mv {
+                return;
+            }
+        }
+        for i in 1..N {
+            self.mvs[ply][i] = self.mvs[ply][i - 1];
+        }
+        self.mvs[ply][0] = Some(mv);
+    }
+}
+
+impl<const N: usize> Default for KillerMoves<N> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Helper type to avoid retyping the same arguments into every function prototype.
 ///
 /// This should be owned outside the actual thinking part so that the engine can remember state
@@ -802,6 +875,8 @@ pub struct EngineState {
     pub time_lims: TimeLimits,
     /// Sets how often Engine checks for Main thread interrupts
     pub interrupts: InterruptMode,
+    /// Killer move table
+    pub killer_table: KillerMoves<KILLER_TABLE_MOVES>,
 }
 
 impl EngineState {
@@ -819,6 +894,7 @@ impl EngineState {
             node_count: 0,
             time_lims,
             interrupts,
+            killer_table: Default::default(),
         }
     }
 
