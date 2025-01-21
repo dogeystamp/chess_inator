@@ -27,7 +27,9 @@ These are some technical details about the features implemented in the engine.
     - Naive pseudo-legal move generation
 - Make/unmake
 - Negamax search
-- Alpha-beta pruning
+    - Alpha-beta pruning
+    - Principal Variation Search (PVS)
+    - Killer move heuristic
 - NNUE evaluation
 - UCI compatibility
 - Iterative deepening
