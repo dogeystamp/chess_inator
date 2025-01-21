@@ -165,9 +165,8 @@ impl Default for SearchConfig {
 }
 
 /// Least valuable victim, most valuable attacker heuristic for captures.
-fn lvv_mva_eval(src_pc: Piece, cap_pc: Piece) -> EvalInt {
-    let pc_values = [500, 300, 300, 20000, 900, 100];
-    pc_values[cap_pc as usize] - pc_values[src_pc as usize]
+const fn lvv_mva_eval(src_pc: Piece, cap_pc: Piece) -> EvalInt {
+    cap_pc.value() - src_pc.value()
 }
 
 /// Assign a priority to a move based on how promising it is.
@@ -185,15 +184,15 @@ fn move_priority(
     if state.config.enable_trans_table {
         if let Some(entry) = &state.cache[board.zobrist] {
             eval = entry.eval.into();
-        } else if state.killer_table.probe(mv, mm.plies) {
-            eval = 10000;
         }
+    }
+
+    if state.killer_table.probe(mv, mm.plies) {
+        eval += 8000;
     } else if let Some(cap_pc) = anti_mv.cap {
         // least valuable victim, most valuable attacker
         eval += lvv_mva_eval(src_pc.into(), cap_pc)
     }
-
-    // TODO: use lvv mva when there is no transposition entry
 
     anti_mv.unmake(board);
 
