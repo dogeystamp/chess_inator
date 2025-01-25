@@ -626,6 +626,8 @@ pub struct AntiNullMove {
 pub struct BoardInformation {
     /// Number of minor and major pieces, i.e. queens rooks bishops and knights.
     n_min_maj_pcs: u8,
+    /// Number of pawns on the board
+    n_pawns: u8,
 }
 
 impl BoardInformation {
@@ -634,6 +636,9 @@ impl BoardInformation {
         match pc.pc {
             Queen | Rook | Bishop | Knight => {
                 self.n_min_maj_pcs += 1
+            }
+            Pawn => {
+                self.n_pawns += 1
             }
             _ => {}
         }
@@ -644,6 +649,9 @@ impl BoardInformation {
         match pc.pc {
             Queen | Rook | Bishop | Knight => {
                 self.n_min_maj_pcs -= 1
+            }
+            Pawn => {
+                self.n_pawns -= 1
             }
             _ => {}
         }

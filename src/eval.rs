@@ -47,7 +47,31 @@ pub trait EvalSEE {
 
 impl Eval for Board {
     fn eval(&self) -> EvalInt {
-        self.nnue.output()
+        let mut eval = 0;
+
+        let nnue_eval = self.nnue.output();
+        eval += nnue_eval;
+
+        // our nnue is kind of not smart in some ways, so we have some HCE features below
+
+        // Attempt to minimize king distance for checkmates
+        if self.info.n_min_maj_pcs == 1 && self.info.n_pawns == 0 {
+            // Signed factor of the color with the static eval advantage.
+            let advantage = nnue_eval / 5;
+
+            let kings1 = self[self.turn][Piece::King].into_iter();
+            let kings2 = self[self.turn.flip()][Piece::King].into_iter();
+            let king_distance = kings1
+                .zip(kings2)
+                .next()
+                .map_or(0, |(k1, k2)| k1.manhattan(k2));
+
+            let king_eval = -advantage * EvalInt::try_from(king_distance).unwrap() / 2;
+
+            eval += king_eval;
+        }
+
+        eval
     }
 }
 
