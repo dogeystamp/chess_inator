@@ -487,7 +487,7 @@ fn minmax(
         // only use null window when we have move ordering through the transposition table
         let do_null_window = !is_next_pv && trans_table_move.is_some() && mm.depth > 2;
 
-        let new_depth = mm.depth - if do_extension { 0 } else { 1 };
+        let new_depth = mm.depth - if do_extension { 0 } else { 2 };
 
         let (_, mut score) = minmax(
             board,
