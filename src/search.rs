@@ -289,22 +289,17 @@ fn minmax(
     // therefore, white would see a negative value for the draw.
     let contempt = state.config.contempt;
 
-    // quiescence stand-pat score (only calculated if needed).
-    // this is where static eval goes.
-    let mut board_eval: Option<EvalInt> = None;
-
-    if mm.quiesce {
-        board_eval = if is_repetition_draw {
-            Some(contempt)
-        } else {
-            Some(board.eval() * EvalInt::from(board.turn.sign()))
-        }
-    }
+    // static evaluation
+    let board_eval = if is_repetition_draw {
+        contempt
+    } else {
+        board.eval() * EvalInt::from(board.turn.sign())
+    };
 
     if mm.depth == 0 {
         if mm.quiesce {
             // we hit the limit on quiescence depth
-            return (None, SearchEval::Exact(board_eval.unwrap()));
+            return (None, SearchEval::Exact(board_eval));
         } else {
             // enter quiescence search
             return minmax(
@@ -378,6 +373,8 @@ fn minmax(
         && mm.depth > NULL_MOVE_REDUCTION
         // quiescence is already reduced, so don't reduce it further
         && !mm.quiesce
+        // if our current board is already worse than beta, then null move will often not prune
+        && board_eval >= EvalInt::from(beta)
         // zugzwang happens mostly during king-pawn endgames. zugzwang is when passing our turn
         // would be a disadvantage for the opponent, thus we can't prune that using null moves.
         && board.info.n_min_maj_pcs > 0
@@ -452,7 +449,7 @@ fn minmax(
     if mm.quiesce && !is_in_check {
         // stand pat
         // (when in check, we don't have the option to "do nothing")
-        abs_best = SearchEval::Exact(board_eval.unwrap());
+        abs_best = SearchEval::Exact(board_eval);
     }
 
     let mut best_move: Option<Move> = None;
@@ -470,7 +467,7 @@ fn minmax(
     if mvs.is_empty() {
         if mm.quiesce && !is_in_check {
             // use stand pat
-            return (None, SearchEval::Exact(board_eval.unwrap()));
+            return (None, SearchEval::Exact(board_eval));
         }
 
         if is_in_check {
