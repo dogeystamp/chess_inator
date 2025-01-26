@@ -155,8 +155,8 @@ impl Default for SearchConfig {
     fn default() -> Self {
         SearchConfig {
             alpha_beta_on: true,
-            depth: 16,
-            qdepth: 6,
+            depth: 64 * ONE_PLY,
+            qdepth: 6 * ONE_PLY,
             contempt: 0,
             enable_trans_table: true,
             transposition_size: 16,
