@@ -27,6 +27,9 @@ const EVAL_WORST: EvalInt = -(EVAL_BEST);
 /// Maximum number of plies to search per search.
 pub const MAX_PLY: usize = 128;
 
+/// Depth equivalent to one ply (because fractional plies exist)
+const ONE_PLY: usize = 2;
+
 /// Number of moves to keep in the killer moves table
 const KILLER_TABLE_MOVES: usize = 2;
 
@@ -210,7 +213,7 @@ enum NodeType {
 
 /// State specifically for a minmax call.
 struct MinmaxState {
-    /// how many plies deep this call will search
+    /// how many deep this call will search (measured in fractions of ply; one real ply is [ONE_PLY] here)
     depth: usize,
     /// how many plies have been searched so far before this call
     plies: usize,
@@ -484,7 +487,9 @@ fn minmax(
         // only use null window when we have move ordering through the transposition table
         let do_null_window = !is_next_pv && trans_table_move.is_some() && mm.depth > 2;
 
-        let new_depth = mm.depth.saturating_sub(if do_extension { 0 } else { 2 });
+        let new_depth = mm
+            .depth
+            .saturating_sub(if do_extension { 0 } else { ONE_PLY });
 
         let (_, mut score) = minmax(
             board,
