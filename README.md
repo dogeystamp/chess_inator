@@ -106,6 +106,8 @@ For development purposes, [fast-chess](https://github.com/disservin/fastchess),
 a CLI interface, is used for running tournaments against different versions of
 the engine. See `contrib/fast-chess-tag.sh` for help using it.
 
+(For neural net weights) [Set up `git-lfs`.](https://graphite.dev/guides/how-to-use-git-large-file-storage-lfs)
+
 Clone the repo:
 
     git clone https://github.com/dogeystamp/chess_inator

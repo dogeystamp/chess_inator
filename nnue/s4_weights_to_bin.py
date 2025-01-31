@@ -161,6 +161,6 @@ if __name__ == "__main__":
             params[0].data = torch.transpose(params[0].data, 0, 1)
             params[1].data *= SCALE_L1
             params[2].data *= SCALE_OUT
-            params[3].data *= SCALE_OUT
+            params[3].data *= SCALE_OUT * SCALE_L1
             for param in params:
                 f.write(params_bytes(param))
