@@ -285,6 +285,44 @@ fn minmax(
     let is_repetition_draw = board.is_repetition();
     let is_in_check = board.is_check(board.turn);
 
+    #[derive(Debug)]
+    enum MoveGenerator {
+        /// Use heavily pruned search to generate moves leading to a quiet position.
+        Quiescence,
+        /// Generate all legal moves.
+        Normal,
+        /// Only evaluate a single move.
+        None,
+    }
+    let mut move_generator = if mm.quiesce && !is_in_check {
+        // if in check, we need to find all possible evasions
+        MoveGenerator::Quiescence
+    } else {
+        MoveGenerator::Normal
+    };
+
+    let mut trans_table_move: Option<Move> = None;
+    let mut trans_table_static_eval: Option<EvalInt> = None;
+
+    // get transposition table entry
+    if state.config.enable_trans_table {
+        if let Some(entry) = &state.cache[board.zobrist] {
+            trans_table_move = Some(entry.best_move);
+            trans_table_static_eval = entry.static_eval;
+            if usize::from(entry.depth) >= mm.depth
+                && entry.is_qsearch == mm.quiesce
+                && mm.node_type == entry.node_type
+            {
+                if let SearchEval::Exact(_) | SearchEval::Upper(_) = entry.eval {
+                    // at this point, we could just return the best move + eval given, but this
+                    // bypasses the draw by repetition checks in `minmax`. so just don't generate
+                    // any other moves than the best move.
+                    move_generator = MoveGenerator::None;
+                }
+            }
+        }
+    }
+
     let do_extension = is_in_check;
     // conditions to perform null move pruning:
     let do_null_move = mm.allow_null_mv
@@ -305,13 +343,13 @@ fn minmax(
     // therefore, white would see a negative value for the draw.
     let contempt = state.config.contempt;
 
-    // static evaluation
+    // static evaluation from our perspective
     let board_eval = if is_repetition_draw {
         Some(contempt)
     } else if mm.quiesce || do_null_move {
         // we only need static eval for quiescence (stand pat, leaf evals) and for null move prune
         // conditions
-        Some(board.eval() * EvalInt::from(board.turn.sign()))
+        trans_table_static_eval.or(Some(board.eval() * EvalInt::from(board.turn.sign())))
     } else {
         None
     };
@@ -338,42 +376,6 @@ fn minmax(
         }
     }
 
-    #[derive(Debug)]
-    enum MoveGenerator {
-        /// Use heavily pruned search to generate moves leading to a quiet position.
-        Quiescence,
-        /// Generate all legal moves.
-        Normal,
-        /// Only evaluate a single move.
-        None,
-    }
-    let mut move_generator = if mm.quiesce && !is_in_check {
-        // if in check, we need to find all possible evasions
-        MoveGenerator::Quiescence
-    } else {
-        MoveGenerator::Normal
-    };
-
-    let mut trans_table_move: Option<Move> = None;
-
-    // get transposition table entry
-    if state.config.enable_trans_table {
-        if let Some(entry) = &state.cache[board.zobrist] {
-            trans_table_move = Some(entry.best_move);
-            if usize::from(entry.depth) >= mm.depth
-                && entry.is_qsearch == mm.quiesce
-                && mm.node_type == entry.node_type
-            {
-                if let SearchEval::Exact(_) | SearchEval::Upper(_) = entry.eval {
-                    // at this point, we could just return the best move + eval given, but this
-                    // bypasses the draw by repetition checks in `minmax`. so just don't generate
-                    // any other moves than the best move.
-                    move_generator = MoveGenerator::None;
-                }
-            }
-        }
-    }
-
     let is_pv = matches!(mm.node_type, NodeType::PV);
 
     // true in a pv node, until we find a move that raises alpha. then, it becomes false.
@@ -387,8 +389,7 @@ fn minmax(
     // R parameter
     const NULL_MOVE_REDUCTION: usize = 4;
     // if our current board is already worse than beta, then null move will often not prune
-    let do_null_move =
-        do_null_move && board_eval.unwrap() >= EvalInt::from(beta);
+    let do_null_move = do_null_move && board_eval.unwrap() >= EvalInt::from(beta);
 
     // doing nothing is generally very good for the opponent.
     // if we do a null move, and the opponent can't beat their current best score (beta),
@@ -586,6 +587,7 @@ fn minmax(
                     // `as u8` will wrap around to 0, but that's accounted for
                     age: board.plies as u8,
                     node_type: mm.node_type,
+                    static_eval: board_eval,
                 },
             );
         }
@@ -608,6 +610,8 @@ pub struct TranspositionEntry {
     /// half move number when this entry was saved
     age: u8,
     node_type: NodeType,
+    /// Static evaluation of the board, if calculated.
+    static_eval: Option<EvalInt>,
 }
 
 impl crate::hash::TableReplacement for TranspositionEntry {
@@ -639,6 +643,7 @@ mod replacement_test {
             is_qsearch: false,
             age: 0,
             node_type: NodeType::PV,
+            static_eval: None,
         };
         let e2 = TranspositionEntry {
             age: 253,
