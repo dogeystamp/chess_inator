@@ -286,6 +286,19 @@ fn minmax(
     let is_in_check = board.is_check(board.turn);
 
     let do_extension = is_in_check;
+    // conditions to perform null move pruning:
+    let do_null_move = mm.allow_null_mv
+        // prevent going to negative depth
+        && mm.depth > NULL_MOVE_REDUCTION
+        // quiescence is already reduced, so don't reduce it further
+        && !mm.quiesce
+        // zugzwang happens mostly during king-pawn endgames. zugzwang is when passing our turn
+        // would be a disadvantage for the opponent, thus we can't prune that using null moves.
+        && board.info.n_min_maj_pcs > 0
+        // null move while in check leads to the king getting captured; no need to verify that
+        && !is_in_check
+        // draws should not be played out
+        && !is_repetition_draw;
 
     // positive here since we're looking from the opposite perspective.
     // if white caused a draw, then we'd be black here.
@@ -294,15 +307,19 @@ fn minmax(
 
     // static evaluation
     let board_eval = if is_repetition_draw {
-        contempt
+        Some(contempt)
+    } else if mm.quiesce || do_null_move {
+        // we only need static eval for quiescence (stand pat, leaf evals) and for null move prune
+        // conditions
+        Some(board.eval() * EvalInt::from(board.turn.sign()))
     } else {
-        board.eval() * EvalInt::from(board.turn.sign())
+        None
     };
 
     if mm.depth == 0 {
         if mm.quiesce {
             // we hit the limit on quiescence depth
-            return (None, SearchEval::Exact(board_eval));
+            return (None, SearchEval::Exact(board_eval.unwrap()));
         } else {
             // enter quiescence search
             return minmax(
@@ -369,20 +386,9 @@ fn minmax(
 
     // R parameter
     const NULL_MOVE_REDUCTION: usize = 4;
-
-    // conditions to perform null move pruning:
-    let do_null_move = mm.allow_null_mv
-        // prevent going to negative depth
-        && mm.depth > NULL_MOVE_REDUCTION
-        // quiescence is already reduced, so don't reduce it further
-        && !mm.quiesce
-        // if our current board is already worse than beta, then null move will often not prune
-        && board_eval >= EvalInt::from(beta)
-        // zugzwang happens mostly during king-pawn endgames. zugzwang is when passing our turn
-        // would be a disadvantage for the opponent, thus we can't prune that using null moves.
-        && board.info.n_min_maj_pcs > 0
-        // null move while in check leads to the king getting captured; no need to verify that
-        && !is_in_check;
+    // if our current board is already worse than beta, then null move will often not prune
+    let do_null_move =
+        do_null_move && board.eval() * EvalInt::from(board.turn.sign()) >= EvalInt::from(beta);
 
     // doing nothing is generally very good for the opponent.
     // if we do a null move, and the opponent can't beat their current best score (beta),
@@ -452,7 +458,7 @@ fn minmax(
     if mm.quiesce && !is_in_check {
         // stand pat
         // (when in check, we don't have the option to "do nothing")
-        abs_best = SearchEval::Exact(board_eval);
+        abs_best = SearchEval::Exact(board_eval.unwrap());
     }
 
     let mut best_move: Option<Move> = None;
@@ -470,7 +476,7 @@ fn minmax(
     if mvs.is_empty() {
         if mm.quiesce && !is_in_check {
             // use stand pat
-            return (None, SearchEval::Exact(board_eval));
+            return (None, SearchEval::Exact(board_eval.unwrap()));
         }
 
         if is_in_check {
