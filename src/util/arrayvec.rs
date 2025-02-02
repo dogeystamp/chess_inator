@@ -97,6 +97,31 @@ impl<const N: usize, T: Sized> ArrayVec<N, T> {
         }
     }
 
+    /// Keep only the first `n` elements in the vector, and discard all the others.
+    pub fn truncate(&mut self, n: usize) {
+        if n >= self.len {
+            return;
+        }
+
+        let old_len = self.len;
+
+        // SAFETY:
+        // 1. all elements from 0..len are initialized, so reducing len doesn't change that
+        // 2. reducing len will keep `len` in the range 0..N as long as `n` >= 0
+        unsafe { self.set_len(n) }
+
+        for i in self.len..old_len {
+            // SAFETY:
+            // by invariant 1. all these elements were initialized
+            unsafe { self.data[i].assume_init_drop() }
+        }
+    }
+
+    /// Remove all elements from the vector.
+    pub fn clear(&mut self) {
+        self.truncate(0);
+    }
+
     /// Pushes one element to the end of the vector.
     ///
     /// Returns an error if the capacity is exceeded.

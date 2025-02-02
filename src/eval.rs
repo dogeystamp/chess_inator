@@ -25,7 +25,7 @@ pub trait Eval {
     /// Evaluate a position and assign it a score.
     ///
     /// Negative for Black advantage and positive for White.
-    fn eval(&self) -> EvalInt;
+    fn eval(&mut self) -> EvalInt;
 }
 
 pub trait EvalSEE {
@@ -46,7 +46,7 @@ pub trait EvalSEE {
 }
 
 impl Eval for Board {
-    fn eval(&self) -> EvalInt {
+    fn eval(&mut self) -> EvalInt {
         let mut eval = 0;
 
         let nnue_eval = self.nnue.output();
@@ -143,9 +143,9 @@ mod tests {
     /// Sanity check.
     #[test]
     fn test_eval() {
-        let board1 = Board::from_fen("4k3/8/8/8/8/8/PPPPPPPP/RNBQKBNR w KQ - 0 1").unwrap();
+        let mut board1 = Board::from_fen("4k3/8/8/8/8/8/PPPPPPPP/RNBQKBNR w KQ - 0 1").unwrap();
         let eval1 = board1.eval();
-        let board2 = Board::from_fen("rnbqkbnr/pppppppp/8/8/8/8/8/4K3 w kq - 0 1").unwrap();
+        let mut board2 = Board::from_fen("rnbqkbnr/pppppppp/8/8/8/8/8/4K3 w kq - 0 1").unwrap();
         let eval2 = board2.eval();
 
         assert!(eval1 > 0, "got eval {eval1}");

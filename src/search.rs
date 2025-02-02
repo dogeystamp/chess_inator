@@ -961,7 +961,7 @@ pub fn best_move(board: &mut Board, engine_state: &mut EngineState) -> Option<Mo
 /// evaluations are similar. (See https://arxiv.org/html/2412.17948v1.)
 ///
 /// It is the caller's responsibility to get the search evaluation and pass it to this function.
-pub fn is_quiescent_position(board: &Board, eval: SearchEval) -> bool {
+pub fn is_quiescent_position(board: &mut Board, eval: SearchEval) -> bool {
     // max centipawn value difference to call "similar"
     const THRESHOLD: EvalInt = 120;
 
@@ -1002,7 +1002,7 @@ mod tests {
         let mut board =
             Board::from_fen("2rq1rk1/pp1bbppp/3p4/4p1B1/2B1P1n1/1PN5/P1PQ1PPP/R3K2R w KQ - 1 14")
                 .unwrap();
-        let orig_board = board;
+        let orig_board = board.clone();
         let (_line, _eval) = best_line(&mut board, &mut engine_state);
         assert_eq!(
             board,

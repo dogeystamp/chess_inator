@@ -248,6 +248,7 @@ impl FromFen for Board {
                     Color::Black => 1,
                 };
             Zobrist::toggle_board_info(&mut pos);
+            pos.refresh_nnue();
             Ok(pos)
         } else {
             Err(FenError::MissingFields)

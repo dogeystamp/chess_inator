@@ -37,6 +37,8 @@ Copyright © 2024 dogeystamp <dogeystamp@disroot.org>
 //! directory's README file.
 
 use crate::prelude::*;
+use crate::search::MAX_PLY;
+use crate::util::arrayvec::ArrayVec;
 use crate::util::serialization::ConstCursor;
 use std::fmt::Display;
 
@@ -72,6 +74,8 @@ const L1_SIZE: usize = HEADER_DATA.l1_size as usize;
 const L1_SCALE: Param = 255;
 /// Quantization scaling factor (params already scaled; we need to dequantize here)
 const OUT_SCALE: Param = 64;
+/// Output quantization scaling factor (params already scaled; we need to dequantize here)
+const DEQUANTIZE_SCALE: i32 = (L1_SCALE * OUT_SCALE) as i32;
 
 /// All weights and biases of the neural network.
 #[derive(Debug)]
@@ -140,6 +144,10 @@ impl NNUEParameters {
 
 #[allow(long_running_const_eval)]
 const WEIGHTS: NNUEParameters = NNUEParameters::from_bytes(WEIGHTS_BIN);
+/// Sigmoid scaling factor. Makes the output roughly correspond to centipawns.
+///
+/// TODO: calculating this in the function and not as a const causes a stack overflow? why?
+const SCALE_K: i32 = WEIGHTS.k[0] as i32;
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct InputTensor([bool; INP_TENSOR_SIZE]);
@@ -219,32 +227,22 @@ impl Nnue {
         self.bit_set(InputTensor::idx(pc, sq), true);
     }
 
-    pub fn del_piece(&mut self, pc: ColPiece, sq: Square) {
-        self.bit_set(InputTensor::idx(pc, sq), false);
-    }
-
     /// Logits from neural net, which should correspond to centipawns.
     pub fn output(&self) -> EvalInt {
-        // activations
-        let mut z_l1: [Param; L1_SIZE] = [0; L1_SIZE];
-        for (j, z) in z_l1.iter_mut().enumerate() {
-            *z = crelu(self.l1[j])
-        }
-
         let mut out: [EvalInt; OUT_SIZE] = [0; OUT_SIZE];
 
         for (k, out_node) in out.iter_mut().enumerate() {
             *out_node = EvalInt::from(WEIGHTS.out_b[k]);
-            for (j, z) in z_l1.iter().enumerate() {
-                *out_node += EvalInt::from(WEIGHTS.out_w[k][j]) * EvalInt::from(*z);
+            for j in 0..L1_SIZE {
+                *out_node += EvalInt::from(WEIGHTS.out_w[k][j]) * EvalInt::from(crelu(self.l1[j]));
             }
         }
 
         // scaling factor
-        out[0] *= EvalInt::from(WEIGHTS.k[0]);
+        out[0] *= SCALE_K;
 
         // dequantization step
-        out[0] /= EvalInt::from(L1_SCALE * OUT_SCALE);
+        out[0] /= DEQUANTIZE_SCALE;
 
         out[0]
     }
@@ -257,6 +255,145 @@ impl Nnue {
 impl Default for Nnue {
     fn default() -> Self {
         Nnue::new()
+    }
+}
+
+/// NNUE indices changed by a move.
+///
+/// This struct contains the accumulator indices that get turned on and turned off during a move.
+/// Moves fall into these categories:
+///
+/// - quiet move: one off, one on
+/// - capture: two off, one on
+/// - promotion: one off, two on
+/// - castle: two off, two on
+#[derive(Clone, Debug)]
+pub(crate) struct NnueDelta {
+    on: ArrayVec<2, u16>,
+    off: ArrayVec<2, u16>,
+}
+
+impl NnueDelta {
+    fn new() -> Self {
+        NnueDelta {
+            on: ArrayVec::new(),
+            off: ArrayVec::new(),
+        }
+    }
+}
+
+impl Default for NnueDelta {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// History stack for a board to lazily evaluate the NNUE.
+///
+/// This stores successive accumulator states, as well as the indices changed between these states.
+/// When making moves, only the indices are changed. Only when the NNUE output is evaluated will the
+/// accumulator be updated to the correct state.
+#[derive(Debug, Clone)]
+pub(crate) struct NnueHistory {
+    /// Accumulator states.
+    ///
+    /// The first accumulator should correspond to the root position we search from.
+    /// This is heap allocated because it's too big to fit on the stack.
+    pub(crate) accumulators: Vec<Nnue>,
+
+    /// Indices changed after each move.
+    ///
+    /// For an index `i` here, that represents a move made on board `i` to get to board `i+1`.
+    pub(crate) deltas: ArrayVec<MAX_PLY, NnueDelta>,
+
+    /// When making a move, construct a delta in this field.
+    scratch_delta: Option<NnueDelta>,
+}
+
+impl NnueHistory {
+    pub fn new() -> Self {
+        NnueHistory {
+            accumulators: Vec::with_capacity(MAX_PLY),
+            deltas: ArrayVec::new(),
+            scratch_delta: None,
+        }
+    }
+
+    /// Regenerate the current accumulator state and evaluate it.
+    pub fn output(&mut self) -> EvalInt {
+        while self.accumulators.len() <= self.deltas.len() {
+            let acc_idx = self.accumulators.len() - 1;
+
+            self.accumulators
+                .push(*self.accumulators.last().expect("missing root accumulator"));
+            let new_acc = self.accumulators.last_mut().unwrap();
+
+            let delta = &self.deltas[acc_idx];
+            for off_idx in delta.off.iter() {
+                new_acc.bit_set((*off_idx).into(), false)
+            }
+            for on_idx in delta.on.iter() {
+                new_acc.bit_set((*on_idx).into(), true)
+            }
+        }
+
+        let cur_acc = self.accumulators.last().unwrap();
+        cur_acc.output()
+    }
+
+    /// Create a scratch delta.
+    ///
+    /// Call this at the start of makemove.
+    pub fn start_delta(&mut self) {
+        self.scratch_delta = Some(NnueDelta::new());
+    }
+
+    /// Commit the current scratch delta.
+    ///
+    /// Call this at the end of makemove.
+    ///
+    /// ***Panics*** if there is no scratch delta.
+    pub fn commit_delta(&mut self) {
+        self.deltas.push(
+            self.scratch_delta
+                .take()
+                .expect("Tried to commit a None delta"),
+        );
+    }
+
+    /// Unmakes a single ply.
+    pub fn unmake(&mut self) {
+        self.deltas.pop();
+        self.accumulators.truncate(self.deltas.len() + 1);
+    }
+
+    /// Add a piece to the scratch delta.
+    pub fn add_piece(&mut self, pc: ColPiece, sq: Square) {
+        if let Some(scratch_delta) = self.scratch_delta.as_mut() {
+            scratch_delta.on.push(InputTensor::idx(pc, sq) as u16);
+        }
+    }
+
+    /// Add a piece to the scratch delta.
+    pub fn del_piece(&mut self, pc: ColPiece, sq: Square) {
+        if let Some(scratch_delta) = self.scratch_delta.as_mut() {
+            scratch_delta.off.push(InputTensor::idx(pc, sq) as u16);
+        }
+    }
+}
+
+impl PartialEq for NnueHistory {
+    /// Always equal, since comparing two boards with different histories shouldn't matter.
+    fn eq(&self, _other: &Self) -> bool {
+        true
+    }
+}
+
+impl Eq for NnueHistory {}
+
+impl Default for NnueHistory {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -293,5 +430,30 @@ mod tests {
             got,
             expected
         )
+    }
+
+    /// Test that lazy updating NNUE state works well.
+    #[test]
+    fn lazy_eval() {
+        let tcs = [
+            ("4k3/8/8/8/8/8/8/4K2R w K - 0 1", "e1g1"),
+            ("4k3/8/8/8/8/8/8/R3K2R w KQ - 0 1", "e1c1"),
+            (crate::fen::START_POSITION, "a2a3"),
+        ];
+        for (fen, mvs) in tcs {
+            let mut board = Board::from_fen(fen).unwrap();
+            let mvs = mvs
+                .split_whitespace()
+                .map(|x| Move::from_uci_algebraic(x).unwrap());
+            let mut anti_mvs = Vec::new();
+            for mv in mvs {
+                anti_mvs.push(mv.make(&mut board));
+            }
+            let eval1 = board.eval();
+            board.refresh_nnue();
+            assert_eq!(eval1, board.eval(), "failed {}", board.to_fen());
+            board.refresh_nnue();
+            assert_eq!(eval1, board.eval(), "failed {}", board.to_fen());
+        }
     }
 }

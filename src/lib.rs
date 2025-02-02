@@ -634,12 +634,8 @@ impl BoardInformation {
     pub fn add_piece(&mut self, pc: ColPiece, _sq: Square) {
         use Piece::*;
         match pc.pc {
-            Queen | Rook | Bishop | Knight => {
-                self.n_min_maj_pcs += 1
-            }
-            Pawn => {
-                self.n_pawns += 1
-            }
+            Queen | Rook | Bishop | Knight => self.n_min_maj_pcs += 1,
+            Pawn => self.n_pawns += 1,
             _ => {}
         }
     }
@@ -647,12 +643,8 @@ impl BoardInformation {
     pub fn del_piece(&mut self, pc: ColPiece, _sq: Square) {
         use Piece::*;
         match pc.pc {
-            Queen | Rook | Bishop | Knight => {
-                self.n_min_maj_pcs -= 1
-            }
-            Pawn => {
-                self.n_pawns -= 1
-            }
+            Queen | Rook | Bishop | Knight => self.n_min_maj_pcs -= 1,
+            Pawn => self.n_pawns -= 1,
             _ => {}
         }
     }
@@ -661,7 +653,7 @@ impl BoardInformation {
 /// Game state, describes a position.
 ///
 /// Default is empty.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Board {
     /// Player bitboards
     players: [PlayerBoards; N_COLORS],
@@ -690,7 +682,7 @@ pub struct Board {
     turn: Color,
 
     /// Neural network state.
-    nnue: nnue::Nnue,
+    nnue: nnue::NnueHistory,
 
     /// Hash state to incrementally update.
     zobrist: Zobrist,
@@ -699,7 +691,7 @@ pub struct Board {
     recap_sq: Option<Square>,
 
     /// History of recent hashes to avoid repetition draws.
-    history: BoardHistory,
+    history: Box<BoardHistory>,
 
     /// Extra information that is maintained.
     info: BoardInformation,
@@ -822,14 +814,22 @@ impl Board {
         }
     }
 
-    pub fn move_piece(&mut self, src: Square, dest: Square, update_metrics: bool) {
+    /// Move a piece from one square to another.
+    ///
+    /// Returns the existing piece in the destination, if it exists.
+    pub fn move_piece(
+        &mut self,
+        src: Square,
+        dest: Square,
+        update_metrics: bool,
+    ) -> Option<ColPiece> {
         let pc = self.del_piece(src, update_metrics).unwrap_or_else(|| {
             panic!(
                 "move ({src} -> {dest}) should have piece at source (pos '{}')",
                 self.to_fen()
             )
         });
-        self.set_piece(dest, pc, update_metrics);
+        self.set_piece(dest, pc, update_metrics)
     }
 
     /// Get the piece at a location.
@@ -883,6 +883,22 @@ impl Board {
     /// Get the current player to move.
     pub fn get_turn(&self) -> Color {
         self.turn
+    }
+
+    /// Hard refresh the NNUE accumulator state using the board.
+    ///
+    /// Clears the entire history stack and creates a root node with the current board state.
+    /// This is an expensive operation.
+    pub(crate) fn refresh_nnue(&mut self) {
+        self.nnue.accumulators.clear();
+        self.nnue.deltas.clear();
+        let mut nnue = crate::nnue::Nnue::new();
+        for sq in Board::squares() {
+            if let Some(pc) = self.get_piece(sq) {
+                nnue.add_piece(pc, sq);
+            }
+        }
+        self.nnue.accumulators.push(nnue);
     }
 
     /// Maximum amount of moves in the counter to parse before giving up
@@ -1247,36 +1263,12 @@ mod tests {
                 // expected min/maj piece count after the move
                 14,
             ),
-            (
-                "8/8/8/3Q4/3k4/8/8/8 b - - 0 1",
-                "d4d5",
-                0,
-            ),
-            (
-                "8/8/8/3Q4/3k4/8/8/8 b - - 0 1",
-                "d4e3",
-                1,
-            ),
-            (
-                "8/8/8/3Q4/3kp3/8/8/8 b - - 0 1",
-                "d4e3",
-                1,
-            ),
-            (
-                "8/8/8/3Q4/3kp3/8/8/8 b - - 0 1",
-                "e4d5",
-                0,
-            ),
-            (
-                "8/8/8/3Qq3/3kp3/8/8/8 b - - 0 1",
-                "e5d5",
-                1,
-            ),
-            (
-                "8/8/8/3Qq3/3kp3/8/8/8 b - - 0 1",
-                "e5d6",
-                2,
-            ),
+            ("8/8/8/3Q4/3k4/8/8/8 b - - 0 1", "d4d5", 0),
+            ("8/8/8/3Q4/3k4/8/8/8 b - - 0 1", "d4e3", 1),
+            ("8/8/8/3Q4/3kp3/8/8/8 b - - 0 1", "d4e3", 1),
+            ("8/8/8/3Q4/3kp3/8/8/8 b - - 0 1", "e4d5", 0),
+            ("8/8/8/3Qq3/3kp3/8/8/8 b - - 0 1", "e5d5", 1),
+            ("8/8/8/3Qq3/3kp3/8/8/8 b - - 0 1", "e5d6", 2),
         ];
         for (fen, mv, expected) in test_cases {
             let mut board = Board::from_fen(fen).unwrap();

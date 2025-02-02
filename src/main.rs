@@ -175,6 +175,7 @@ fn cmd_go(mut tokens: std::str::SplitWhitespace<'_>, state: &mut MainState) {
 
     let saved_depth = state.config.depth;
     if let Some(depth) = override_depth {
+        // TODO: multiply by ONE_PLY here
         state.config.depth = depth;
     }
 
@@ -203,7 +204,7 @@ fn cmd_go(mut tokens: std::str::SplitWhitespace<'_>, state: &mut MainState) {
     state
         .tx_engine
         .send(MsgToEngine::Go(Box::new(GoMessage {
-            board: state.board,
+            board: state.board.clone(),
             time_lims,
         })))
         .unwrap();
@@ -424,7 +425,8 @@ fn task_engine(tx_main: Sender<MsgToMain>, rx_engine: Receiver<MsgToEngine>) {
 
                     let mut info: Vec<String> = Vec::new();
                     if state.config.nnue_train_info {
-                        let is_quiet = chess_inator::search::is_quiescent_position(&board, eval);
+                        let is_quiet =
+                            chess_inator::search::is_quiescent_position(&mut board, eval);
                         let is_quiet = if is_quiet { "quiet" } else { "non-quiet" };
 
                         let board_tensor = chess_inator::nnue::InputTensor::from_board(&board);

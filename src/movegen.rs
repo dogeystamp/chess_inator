@@ -172,6 +172,7 @@ impl AntiMove {
 
         if update_metrics {
             Zobrist::toggle_board_info(pos);
+            pos.nnue.unmake();
         }
     }
 }
@@ -222,6 +223,7 @@ impl Move {
         if update_metrics {
             // undo hashes (we will update them at the end of this function)
             Zobrist::toggle_board_info(pos);
+            pos.nnue.start_delta();
         }
 
         // reset en passant
@@ -407,6 +409,7 @@ impl Move {
         if update_metrics {
             // redo hashes (we undid them at the start of this function)
             Zobrist::toggle_board_info(pos);
+            pos.nnue.commit_delta();
         }
 
         anti_move
@@ -1079,9 +1082,13 @@ impl MoveGenInternal for Board {
                 let is_any_checked = check_range
                     .map(|nc| Square::from_row_col_signed(r, nc).unwrap())
                     .map(|dest| {
-                        let mut board = *self;
-                        board.move_piece(src, dest, false);
-                        board.is_check(self.turn)
+                        let cap_pc = self.move_piece(src, dest, false);
+
+                        let ret = self.is_check(self.turn);
+
+                        let orig_pc = self.set_square(dest, cap_pc, false);
+                        self.set_square(src, orig_pc, false);
+                        ret
                     })
                     .any(|x| x);
                 if is_any_checked {
