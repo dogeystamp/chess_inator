@@ -319,6 +319,13 @@ impl NnueHistory {
         }
     }
 
+    /// Discard all state.
+    pub fn clear(&mut self) {
+        self.deltas.clear();
+        self.accumulators.clear();
+        self.scratch_delta = None;
+    }
+
     /// Regenerate the current accumulator state and evaluate it.
     pub fn output(&mut self) -> EvalInt {
         while self.accumulators.len() <= self.deltas.len() {

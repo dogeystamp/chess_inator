@@ -70,7 +70,10 @@ fn cmd_position_moves(mut tokens: std::str::SplitWhitespace<'_>, mut board: Boar
                     let mv = Move::from_uci_algebraic(mv).unwrap();
                     board.push_history();
                     let _ = mv.make(&mut board);
+                    // we won't be going back in time, so these states are useless
+                    board.discard_nnue();
                 }
+                board.refresh_nnue();
             }
             _ => ignore!(),
         }
@@ -218,6 +221,7 @@ fn cmd_go(mut tokens: std::str::SplitWhitespace<'_>, state: &mut MainState) {
 /// information.
 fn cmd_eval(mut _tokens: std::str::SplitWhitespace<'_>, state: &mut MainState) {
     println!("STATIC EVAL");
+    println!("board fen: {}", state.board.to_fen());
     println!("{}", state.board.eval());
 }
 

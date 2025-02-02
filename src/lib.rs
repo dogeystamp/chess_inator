@@ -708,6 +708,11 @@ impl Board {
         self.history.push(self.zobrist);
     }
 
+    /// Discard NNUE state.
+    pub fn discard_nnue(&mut self) {
+        self.nnue.clear();
+    }
+
     /// Is this position a draw by three repetitions?
     pub fn is_repetition(&mut self) -> bool {
         self.history
@@ -885,11 +890,11 @@ impl Board {
         self.turn
     }
 
-    /// Hard refresh the NNUE accumulator state using the board.
+    /// Set the current board state as the root NNUE state.
+    /// In other words, hard refresh the NNUE.
     ///
-    /// Clears the entire history stack and creates a root node with the current board state.
     /// This is an expensive operation.
-    pub(crate) fn refresh_nnue(&mut self) {
+    pub fn refresh_nnue(&mut self) {
         self.nnue.accumulators.clear();
         self.nnue.deltas.clear();
         let mut nnue = crate::nnue::Nnue::new();
