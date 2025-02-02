@@ -388,7 +388,7 @@ fn minmax(
     const NULL_MOVE_REDUCTION: usize = 4;
     // if our current board is already worse than beta, then null move will often not prune
     let do_null_move =
-        do_null_move && board.eval() * EvalInt::from(board.turn.sign()) >= EvalInt::from(beta);
+        do_null_move && board_eval.unwrap() >= EvalInt::from(beta);
 
     // doing nothing is generally very good for the opponent.
     // if we do a null move, and the opponent can't beat their current best score (beta),
