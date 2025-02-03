@@ -104,7 +104,7 @@ pub struct ZobristTable<T> {
 /// The number of entries is rounded to the lower power of 2.
 pub fn mib_to_n<T: Sized>(mib: usize) -> usize {
     let bytes = mib * (1 << 20);
-    let entry_size = std::mem::size_of::<T>();
+    let entry_size = std::mem::size_of::<(Zobrist, Option<T>)>();
 
     let entries = bytes / entry_size;
     if entries == 0 {
