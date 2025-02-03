@@ -86,7 +86,7 @@ impl Zobrist {
 
     /// Convert hash to an index.
     fn truncate_hash(&self, size: usize) -> usize {
-        (self.hash & ((1 << size) - 1)) as usize
+        self.hash as usize % size
     }
 }
 
@@ -100,18 +100,11 @@ pub struct ZobristTable<T> {
 }
 
 /// Convert a transposition table size in mebibytes to a number of entries.
-///
-/// The number of entries is rounded to the lower power of 2.
 pub fn mib_to_n<T: Sized>(mib: usize) -> usize {
     let bytes = mib * (1 << 20);
     let entry_size = std::mem::size_of::<(Zobrist, Option<T>)>();
 
-    let entries = bytes / entry_size;
-    if entries == 0 {
-        0
-    } else {
-        entries.ilog2().try_into().unwrap()
-    }
+    bytes / entry_size
 }
 
 impl<T: Copy> ZobristTable<T> {
@@ -125,8 +118,16 @@ impl<T: Copy> ZobristTable<T> {
         Self::new_n(size)
     }
 
+    /// Create a table with n entries.
+    pub fn new_n(size: usize) -> Self {
+        ZobristTable {
+            data: vec![(Zobrist { hash: 0 }, None); size],
+            size,
+        }
+    }
+
     /// Create a table with 2^n entries.
-    pub fn new_n(size_exp: usize) -> Self {
+    pub fn new_pow2(size_exp: usize) -> Self {
         ZobristTable {
             data: vec![(Zobrist { hash: 0 }, None); 1 << size_exp],
             size: size_exp,
@@ -281,7 +282,7 @@ mod tests {
 
     #[test]
     fn test_table() {
-        let mut table = ZobristTable::<usize>::new_n(4);
+        let mut table = ZobristTable::<usize>::new_pow2(4);
 
         macro_rules! z {
             ($i: expr) => {
@@ -310,7 +311,7 @@ mod tests {
 
     #[test]
     fn test_replacement() {
-        let mut table = ZobristTable::<usize>::new_n(4);
+        let mut table = ZobristTable::<usize>::new_pow2(4);
 
         macro_rules! z {
             ($i: expr) => {
