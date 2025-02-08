@@ -327,7 +327,7 @@ fn minmax(
     // conditions to perform null move pruning:
     let do_null_move = mm.allow_null_mv
         // prevent going to negative depth
-        && mm.depth > NULL_MOVE_REDUCTION
+        && mm.depth > NULL_MOVE_REDUCTION + ONE_PLY
         // quiescence is already reduced, so don't reduce it further
         && !mm.quiesce
         // zugzwang happens mostly during king-pawn endgames. zugzwang is when passing our turn
@@ -387,7 +387,7 @@ fn minmax(
     let beta = mm.beta.unwrap_or(EVAL_BEST);
 
     // R parameter
-    const NULL_MOVE_REDUCTION: usize = 4;
+    const NULL_MOVE_REDUCTION: usize = 2 * ONE_PLY + 1;
     // if our current board is already worse than beta, then null move will often not prune
     let do_null_move = do_null_move && board_eval.unwrap() >= EvalInt::from(beta);
 
@@ -400,7 +400,7 @@ fn minmax(
             board,
             state,
             MinmaxState {
-                depth: mm.depth - NULL_MOVE_REDUCTION - 1,
+                depth: mm.depth - NULL_MOVE_REDUCTION - ONE_PLY,
                 // null window around beta: our opponent tries to beat their current best
                 alpha: Some(-beta),
                 beta: Some(-beta + 1),
