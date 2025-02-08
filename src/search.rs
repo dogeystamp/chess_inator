@@ -584,8 +584,6 @@ fn minmax(
                     eval: abs_best,
                     depth: u8::try_from(mm.depth).unwrap(),
                     is_qsearch: mm.quiesce,
-                    // `as u8` will wrap around to 0, but that's accounted for
-                    age: board.plies as u8,
                     node_type: mm.node_type,
                     static_eval: board_eval,
                 },
@@ -607,95 +605,15 @@ pub struct TranspositionEntry {
     depth: u8,
     /// is this score within the context of quiescence
     is_qsearch: bool,
-    /// half move number when this entry was saved
-    age: u8,
     node_type: NodeType,
     /// Static evaluation of the board, if calculated.
     static_eval: Option<EvalInt>,
 }
 
 impl crate::hash::TableReplacement for TranspositionEntry {
-    fn replaces(&self, other: &Self) -> bool {
-        if self.depth >= other.depth {
-            return true;
-        }
-
-        let age_diff = self.age.wrapping_sub(other.age);
-
-        age_diff >= (other.depth - self.depth)
-    }
-}
-
-#[cfg(test)]
-mod replacement_test {
-    use super::*;
-
-    #[test]
-    fn ordering() {
-        let e1 = TranspositionEntry {
-            best_move: Move {
-                src: Square(0),
-                dest: Square(0),
-                move_type: crate::movegen::MoveType::Normal,
-            },
-            eval: SearchEval::Exact(0),
-            depth: 2,
-            is_qsearch: false,
-            age: 0,
-            node_type: NodeType::PV,
-            static_eval: None,
-        };
-        let e2 = TranspositionEntry {
-            age: 253,
-            depth: 2,
-            ..e1
-        };
-        use crate::hash::TableReplacement;
-        assert!(e1.replaces(&e2));
-
-        let e2_again = TranspositionEntry {
-            age: 255,
-            depth: 4,
-            ..e1
-        };
-
-        assert!(!e1.replaces(&e2_again));
-
-        let e2_again_pt_ii = TranspositionEntry {
-            age: 254,
-            depth: 4,
-            ..e1
-        };
-
-        assert!(e1.replaces(&e2_again_pt_ii));
-
-        let e3 = TranspositionEntry {
-            age: 0,
-            depth: 2,
-            ..e1
-        };
-        assert!(e3.replaces(&e1));
-
-        let e4 = TranspositionEntry {
-            age: 2,
-            depth: 2,
-            ..e1
-        };
-        assert!(e4.replaces(&e1));
-
-        let e5 = TranspositionEntry {
-            age: 2,
-            depth: 1,
-            ..e1
-        };
-        assert!(e5.replaces(&e1));
-
-        let e6 = TranspositionEntry {
-            age: 0,
-            depth: 1,
-            ..e1
-        };
-        assert!(!e6.replaces(&e1));
+    fn replaces(&self, _other: &Self) -> bool {
+        // always-replace strategy
+        true
     }
 }
 
