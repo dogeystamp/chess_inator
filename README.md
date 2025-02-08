@@ -94,6 +94,8 @@ technical details about the training pipeline.
 - **Generation 4:** (tag `nnue4-320`) has 320 hidden layer neurons, and is
   trained from gen 3's evaluation of around 18 million Lichess elite
   database positions (June & July 2024).
+- **Generation 5:** (tag `nnue05a-320`) is derived from gen 4, fine-tuned on
+  roughly 3 million self-play games.
 
 ## development instructions
 
