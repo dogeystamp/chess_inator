@@ -156,7 +156,7 @@ impl Default for SearchConfig {
         SearchConfig {
             alpha_beta_on: true,
             depth: 64 * ONE_PLY,
-            qdepth: 3 * ONE_PLY,
+            qdepth: 4 * ONE_PLY,
             contempt: 0,
             enable_trans_table: true,
             transposition_size: 16,
