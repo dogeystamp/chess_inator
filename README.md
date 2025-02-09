@@ -130,3 +130,16 @@ Flamegraph (on perft):
 
     export CARGO_PROFILE_RELEASE_DEBUG true
     cargo flamegraph --test perft
+
+## acknowledgements
+
+This project would not have been possible without the following:
+
+- [Chess Programming Wiki](https://www.chessprogramming.org/Main_Page): the source of a lot of algorithms used in chess-inator
+- [fastchess](https://github.com/Disservin/fastchess): the main tool used to test this engine
+- [pgn-extract](https://www.cs.kent.ac.uk/people/staff/djb/pgn-extract/): used in the training pipeline
+- [Stockfish opening books](https://github.com/official-stockfish/books/): used in testing and training
+- [Stockfish NNUE docs](https://github.com/official-stockfish/nnue-pytorch/blob/master/docs/nnue.md): very helpful in understanding NNUE
+- [Bullet NNUE docs](https://github.com/jw1912/bullet/blob/main/docs/1-basics.md): helpful in understanding NNUE
+- [PyTorch](https://pytorch.org/): network training framework
+- [Rust](https://www.rust-lang.org/): great language
