@@ -471,9 +471,14 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Optio
     }
 
     if mvs.is_empty() {
-        if mm.quiesce && !is_in_check {
-            // use stand pat
-            return (None, Score::Exact(board_eval.unwrap()));
+        if mm.quiesce {
+            return if !is_in_check {
+                // use stand pat
+                (None, Score::Exact(board_eval.unwrap()))
+            } else {
+                // return very bad score, but not checkmate, because checkmate is handled specially
+                (None, Score::Exact(board_eval.unwrap().saturating_sub(2000)))
+            }
         }
 
         if is_in_check {
@@ -702,6 +707,11 @@ fn iter_deep(board: &mut Board, state: &mut EngineState) -> IterDeepResult {
                     if Instant::now() > soft_lim {
                         return cur;
                     }
+                }
+
+                if let Score::Checkmate(_) = cur.eval {
+                    // no point looking further after we get a mate score
+                    return cur;
                 }
             }
             prev = cur;
