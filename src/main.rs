@@ -447,8 +447,10 @@ fn task_engine(tx_main: Sender<MsgToMain>, rx_engine: Receiver<MsgToEngine>) {
                         }))
                     }
 
-                    let elapsed_ms = think_start.elapsed().as_millis() as usize;
-                    let nps = state.node_count.saturating_mul(1000) / elapsed_ms;
+                    // elapsed microseconds, plus one to avoid division by zero
+                    let elapsed_us = (think_start.elapsed().as_micros() as usize).saturating_add(1);
+
+                    let nps = state.node_count.saturating_mul(1_000_000) / elapsed_us;
 
                     tx_main
                         .send(MsgToMain::Bestmove(MsgBestmove {
@@ -457,7 +459,7 @@ fn task_engine(tx_main: Sender<MsgToMain>, rx_engine: Receiver<MsgToEngine>) {
                             info,
                             nodes: state.node_count,
                             nps,
-                            time_ms: elapsed_ms,
+                            time_ms: elapsed_us / 1000,
                         }))
                         .unwrap();
                 }
