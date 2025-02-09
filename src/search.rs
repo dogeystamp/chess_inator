@@ -28,7 +28,7 @@ const EVAL_WORST: EvalInt = -(EVAL_BEST);
 pub const MAX_PLY: usize = 128;
 
 /// Depth equivalent to one ply (because fractional plies exist)
-const ONE_PLY: usize = 2;
+pub const ONE_PLY: usize = 2;
 
 /// Number of moves to keep in the killer moves table
 const KILLER_TABLE_MOVES: usize = 2;
@@ -45,9 +45,9 @@ mod test_eval_int {
     }
 }
 
-/// Eval in the context of search.
+/// Evaluation of a position.
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
-pub enum SearchEval {
+pub enum Score {
     /// Mate in |n| - 1 half moves, negative for own mate.
     Checkmate(i8),
     /// Centipawn score (exact).
@@ -60,11 +60,11 @@ pub enum SearchEval {
     Stopped,
 }
 
-impl SearchEval {
+impl Score {
     /// Flip side, and increment the "mate in n" counter.
     fn increment(self) -> Self {
         match self {
-            SearchEval::Checkmate(n) => {
+            Score::Checkmate(n) => {
                 debug_assert_ne!(n, 0);
                 if n < 0 {
                     Self::Checkmate(-(n - 1))
@@ -72,18 +72,18 @@ impl SearchEval {
                     Self::Checkmate(-(n + 1))
                 }
             }
-            SearchEval::Exact(eval) => Self::Exact(-eval),
-            SearchEval::Lower(eval) => Self::Upper(-eval),
-            SearchEval::Upper(eval) => Self::Lower(-eval),
-            SearchEval::Stopped => SearchEval::Stopped,
+            Score::Exact(eval) => Self::Exact(-eval),
+            Score::Lower(eval) => Self::Upper(-eval),
+            Score::Upper(eval) => Self::Lower(-eval),
+            Score::Stopped => Score::Stopped,
         }
     }
 }
 
-impl From<SearchEval> for EvalInt {
-    fn from(value: SearchEval) -> Self {
+impl From<Score> for EvalInt {
+    fn from(value: Score) -> Self {
         match value {
-            SearchEval::Checkmate(n) => {
+            Score::Checkmate(n) => {
                 debug_assert_ne!(n, 0);
                 if n < 0 {
                     EVAL_WORST - EvalInt::from(n)
@@ -91,15 +91,15 @@ impl From<SearchEval> for EvalInt {
                     EVAL_BEST - EvalInt::from(n)
                 }
             }
-            SearchEval::Exact(eval) => eval,
-            SearchEval::Lower(eval) => eval,
-            SearchEval::Upper(eval) => eval,
-            SearchEval::Stopped => panic!("Attempted to evaluate a halted search"),
+            Score::Exact(eval) => eval,
+            Score::Lower(eval) => eval,
+            Score::Upper(eval) => eval,
+            Score::Stopped => panic!("Attempted to evaluate a halted search"),
         }
     }
 }
 
-impl Ord for SearchEval {
+impl Ord for Score {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         let e1 = EvalInt::from(*self);
         let e2 = EvalInt::from(*other);
@@ -107,7 +107,7 @@ impl Ord for SearchEval {
     }
 }
 
-impl PartialOrd for SearchEval {
+impl PartialOrd for Score {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
@@ -118,9 +118,9 @@ impl PartialOrd for SearchEval {
 pub struct SearchConfig {
     /// Enable alpha-beta pruning.
     pub alpha_beta_on: bool,
-    /// Limit regular search depth
+    /// Limit regular search depth. Measured in fractional ply; multiply by plies by [`ONE_PLY`].
     pub depth: usize,
-    /// Limit quiescence search depth
+    /// Limit quiescence search depth. Measured in fractional ply; multiply by plies by [`ONE_PLY`].
     pub qdepth: usize,
 
     /// Tells the engine to never stop thinking, because it is currently pondering.
@@ -243,11 +243,7 @@ struct MinmaxState {
 /// # Returns
 ///
 /// The best move, and its corresponding absolute eval for the current player.
-fn minmax(
-    board: &mut Board,
-    state: &mut EngineState,
-    mm: MinmaxState,
-) -> (Option<Move>, SearchEval) {
+fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Option<Move>, Score) {
     // occasionally check if we should stop the engine
     let interrupt_cycle = match state.interrupts {
         InterruptMode::Normal => Some(1 << 16),
@@ -262,7 +258,7 @@ fn minmax(
                     MsgToEngine::Configure(cfg) => state.config = cfg,
                     // respect the hard stop if given
                     MsgToEngine::Stop => {
-                        return (None, SearchEval::Stopped);
+                        return (None, Score::Stopped);
                     }
                     MsgToEngine::NewGame => panic!("received newgame while thinking"),
                 },
@@ -275,7 +271,7 @@ fn minmax(
             if !state.config.pondering {
                 if let Some(hard) = state.time_lims.hard {
                     if Instant::now() > hard {
-                        return (None, SearchEval::Stopped);
+                        return (None, Score::Stopped);
                     }
                 }
             }
@@ -313,7 +309,7 @@ fn minmax(
                 && entry.is_qsearch == mm.quiesce
                 && mm.node_type == entry.node_type
             {
-                if let SearchEval::Exact(_) | SearchEval::Upper(_) = entry.eval {
+                if let Score::Exact(_) | Score::Upper(_) = entry.eval {
                     // at this point, we could just return the best move + eval given, but this
                     // bypasses the draw by repetition checks in `minmax`. so just don't generate
                     // any other moves than the best move.
@@ -357,7 +353,7 @@ fn minmax(
     if mm.depth == 0 {
         if mm.quiesce {
             // we hit the limit on quiescence depth
-            return (None, SearchEval::Exact(board_eval.unwrap()));
+            return (None, Score::Exact(board_eval.unwrap()));
         } else {
             // enter quiescence search
             return minmax(
@@ -417,8 +413,8 @@ fn minmax(
         board.unmake_null_move(anti_mv);
 
         // propagate hard stops
-        if matches!(score, SearchEval::Stopped) {
-            return (None, SearchEval::Stopped);
+        if matches!(score, Score::Stopped) {
+            return (None, Score::Stopped);
         }
 
         let abs_score = score.increment();
@@ -454,12 +450,12 @@ fn minmax(
     // sort moves by decreasing priority
     mvs.sort_unstable_by_key(|mv| -mv.0);
 
-    let mut abs_best = SearchEval::Exact(EVAL_WORST);
+    let mut abs_best = Score::Exact(EVAL_WORST);
 
     if mm.quiesce && !is_in_check {
         // stand pat
         // (when in check, we don't have the option to "do nothing")
-        abs_best = SearchEval::Exact(board_eval.unwrap());
+        abs_best = Score::Exact(board_eval.unwrap());
     }
 
     let mut best_move: Option<Move> = None;
@@ -477,14 +473,14 @@ fn minmax(
     if mvs.is_empty() {
         if mm.quiesce && !is_in_check {
             // use stand pat
-            return (None, SearchEval::Exact(board_eval.unwrap()));
+            return (None, Score::Exact(board_eval.unwrap()));
         }
 
         if is_in_check {
-            return (None, SearchEval::Checkmate(-1));
+            return (None, Score::Checkmate(-1));
         } else {
             // stalemate
-            return (None, SearchEval::Exact(0));
+            return (None, Score::Exact(0));
         }
     }
 
@@ -519,7 +515,7 @@ fn minmax(
 
         if do_null_window {
             let abs_score = score.increment();
-            if let SearchEval::Lower(cp) = abs_score {
+            if let Score::Lower(cp) = abs_score {
                 if alpha <= cp && cp <= beta {
                     // alpha means this move was better than expected, so re-search with full window
                     // if it's above beta then don't even bother re-searching, it causes a cutoff
@@ -543,8 +539,8 @@ fn minmax(
         anti_mv.unmake(board);
 
         // propagate hard stops
-        if matches!(score, SearchEval::Stopped) {
-            return (None, SearchEval::Stopped);
+        if matches!(score, Score::Stopped) {
+            return (None, Score::Stopped);
         }
 
         let abs_score = score.increment();
@@ -563,8 +559,8 @@ fn minmax(
             // (different moves in the parent node). Alpha > beta means the eval here is _worse_
             // for the other player, so they will never make the move that leads into this branch.
             // Therefore, we stop evaluating this branch at all.
-            if let SearchEval::Upper(eval) | SearchEval::Exact(eval) = abs_best {
-                abs_best = SearchEval::Lower(eval);
+            if let Score::Upper(eval) | Score::Exact(eval) = abs_best {
+                abs_best = Score::Lower(eval);
             }
             state.killer_table.write_mv(mv, mm.plies);
             break;
@@ -572,7 +568,7 @@ fn minmax(
     }
 
     if is_repetition_draw {
-        abs_best = SearchEval::Exact(contempt);
+        abs_best = Score::Exact(contempt);
     }
 
     if let Some(best_move) = best_move {
@@ -600,7 +596,7 @@ pub struct TranspositionEntry {
     /// best move found last time
     best_move: Move,
     /// last time's eval
-    eval: SearchEval,
+    eval: Score,
     /// depth of this entry
     depth: u8,
     /// is this score within the context of quiescence
@@ -619,25 +615,56 @@ impl crate::hash::TableReplacement for TranspositionEntry {
 
 pub type TranspositionTable = ZobristTable<TranspositionEntry>;
 
+/// Result of [`iter_deep`].
+struct IterDeepResult {
+    /// Best move in this position.
+    ///
+    /// May be `None` since sometimes there are no legal moves,
+    /// or the search was halted.
+    best_mv: Option<Move>,
+
+    /// The evaluation of the position.
+    eval: Score,
+
+    /// Nominal depth searched, measured in fractional plies.
+    ///
+    /// Divide by [`ONE_PLY`] to get depth in plies.
+    depth: usize,
+}
+
+impl IterDeepResult {
+    /// Instantiate this struct from the result of [`minmax`].
+    fn from_minmax_ret(depth: usize, ret: (Option<Move>, Score)) -> Self {
+        Self {
+            best_mv: ret.0,
+            eval: ret.1,
+            depth,
+        }
+    }
+}
+
 /// Iteratively deepen search until it is stopped.
-fn iter_deep(board: &mut Board, state: &mut EngineState) -> (Option<Move>, SearchEval) {
+fn iter_deep(board: &mut Board, state: &mut EngineState) -> IterDeepResult {
     // wipe the table
     state.killer_table = KillerMoves::new();
 
     state.interrupts = InterruptMode::MustComplete;
 
-    let (mut prev_move, mut prev_eval) = minmax(
-        board,
-        state,
-        MinmaxState {
-            depth: 1,
-            alpha: None,
-            beta: None,
-            plies: 0,
-            quiesce: false,
-            allow_null_mv: false,
-            node_type: NodeType::PV,
-        },
+    let mut prev = IterDeepResult::from_minmax_ret(
+        1,
+        minmax(
+            board,
+            state,
+            MinmaxState {
+                depth: 1,
+                alpha: None,
+                beta: None,
+                plies: 0,
+                quiesce: false,
+                allow_null_mv: false,
+                node_type: NodeType::PV,
+            },
+        ),
     );
 
     state.interrupts = InterruptMode::Normal;
@@ -650,34 +677,37 @@ fn iter_deep(board: &mut Board, state: &mut EngineState) -> (Option<Move>, Searc
     };
 
     for depth in 2..=max_depth {
-        let (mv, eval) = minmax(
-            board,
-            state,
-            MinmaxState {
-                depth,
-                alpha: None,
-                beta: None,
-                plies: 0,
-                quiesce: false,
-                allow_null_mv: false,
-                node_type: NodeType::PV,
-            },
+        let cur = IterDeepResult::from_minmax_ret(
+            depth,
+            minmax(
+                board,
+                state,
+                MinmaxState {
+                    depth,
+                    alpha: None,
+                    beta: None,
+                    plies: 0,
+                    quiesce: false,
+                    allow_null_mv: false,
+                    node_type: NodeType::PV,
+                },
+            ),
         );
 
-        if matches!(eval, SearchEval::Stopped) {
-            return (prev_move, prev_eval);
+        if matches!(cur.eval, Score::Stopped) {
+            return prev;
         } else {
             if !state.config.pondering {
                 if let Some(soft_lim) = state.time_lims.soft {
                     if Instant::now() > soft_lim {
-                        return (mv, eval);
+                        return cur;
                     }
                 }
             }
-            (prev_move, prev_eval) = (mv, eval);
+            prev = cur;
         }
     }
-    (prev_move, prev_eval)
+    prev
 }
 
 /// Deadlines for the engine to think of a move.
@@ -863,25 +893,49 @@ pub fn probe_pv(board: &mut Board, state: &mut EngineState, stack: &mut PVStack)
     }
 }
 
-/// Find the best line and its evaluation.
-pub fn best_line(board: &mut Board, state: &mut EngineState) -> (PVStack, SearchEval) {
-    let (best_mv, eval) = iter_deep(board, state);
+/// Result of [`search`].
+pub struct SearchResult {
+    /// Best continuation stack (last element is the current best move).
+    pub pv: PVStack,
+    /// Evaluation of the position.
+    pub eval: Score,
 
-    let mut best_line = ArrayVec::<MAX_PV, Move>::new();
-    if let Some(best_mv) = best_mv {
+    /// The (nominal) depth searched.
+    ///
+    /// This does not include quiescence depth (more depth), and it does not include pruning (less
+    /// depth).
+    pub depth: usize,
+}
+
+/// Search for the best move, and return all information possible.
+pub fn search(board: &mut Board, state: &mut EngineState) -> SearchResult {
+    let res = iter_deep(board, state);
+
+    let mut best_line = PVStack::new();
+    if let Some(best_mv) = res.best_mv {
         best_line.push(best_mv);
         let anti_mv = best_mv.make(board);
         probe_pv(board, state, &mut best_line);
         anti_mv.unmake(board);
     }
 
-    (best_line, eval)
+    SearchResult {
+        pv: best_line,
+        eval: res.eval,
+        depth: res.depth / ONE_PLY,
+    }
 }
 
 /// Find the best move.
 pub fn best_move(board: &mut Board, engine_state: &mut EngineState) -> Option<Move> {
-    let (best_mv, _eval) = iter_deep(board, engine_state);
-    best_mv
+    let res = iter_deep(board, engine_state);
+    res.best_mv
+}
+
+/// Find the best continuation.
+pub fn best_line(board: &mut Board, engine_state: &mut EngineState) -> (PVStack, Score) {
+    let res = search(board, engine_state);
+    (res.pv, res.eval)
 }
 
 /// Utility for NNUE training set generation to determine if a position is quiet or not.
@@ -890,7 +944,7 @@ pub fn best_move(board: &mut Board, engine_state: &mut EngineState) -> Option<Mo
 /// evaluations are similar. (See https://arxiv.org/html/2412.17948v1.)
 ///
 /// It is the caller's responsibility to get the search evaluation and pass it to this function.
-pub fn is_quiescent_position(board: &mut Board, eval: SearchEval) -> bool {
+pub fn is_quiescent_position(board: &mut Board, eval: Score) -> bool {
     // max centipawn value difference to call "similar"
     const THRESHOLD: EvalInt = 120;
 
@@ -898,7 +952,7 @@ pub fn is_quiescent_position(board: &mut Board, eval: SearchEval) -> bool {
         return false;
     }
 
-    if matches!(eval, SearchEval::Checkmate(_)) {
+    if matches!(eval, Score::Checkmate(_)) {
         return false;
     }
 
@@ -932,7 +986,7 @@ mod tests {
             Board::from_fen("2rq1rk1/pp1bbppp/3p4/4p1B1/2B1P1n1/1PN5/P1PQ1PPP/R3K2R w KQ - 1 14")
                 .unwrap();
         let orig_board = board.clone();
-        let (_line, _eval) = best_line(&mut board, &mut engine_state);
+        let _result = best_line(&mut board, &mut engine_state);
         assert_eq!(
             board,
             orig_board,

@@ -20,7 +20,7 @@ pub use crate::eval::{Eval, EvalInt, EvalSEE};
 pub use crate::fen::{FromFen, ToFen};
 pub use crate::movegen::{FromUCIAlgebraic, GenAttackers, Move, MoveGen, MoveList, ToUCIAlgebraic};
 pub use crate::search::{
-    best_line, best_move, EngineState, InterruptMode, PVStack, SearchConfig, SearchEval,
+    best_line, best_move, search, EngineState, InterruptMode, PVStack, Score, SearchConfig,
     TimeLimits, TranspositionTable,
 };
 pub use crate::{

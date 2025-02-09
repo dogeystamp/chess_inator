@@ -179,8 +179,7 @@ fn cmd_go(mut tokens: std::str::SplitWhitespace<'_>, state: &mut MainState) {
 
     let saved_depth = state.config.depth;
     if let Some(depth) = override_depth {
-        // TODO: multiply by ONE_PLY here
-        state.config.depth = depth;
+        state.config.depth = depth * chess_inator::search::ONE_PLY;
     }
 
     state.config.pondering = ponder;
@@ -366,13 +365,16 @@ fn outp_bestmove(bestmove: MsgBestmove) {
             .map(|mv| mv.to_uci_algebraic())
             .fold(String::new(), |a, b| a + " " + &b)
     );
-    println!("info nodes {} nps {}", bestmove.nodes, bestmove.nps,);
+    println!(
+        "info depth {} nodes {} nps {}",
+        bestmove.depth, bestmove.nodes, bestmove.nps,
+    );
     match bestmove.eval {
-        SearchEval::Checkmate(n) => println!("info score mate {}", n / 2),
-        SearchEval::Exact(eval) | SearchEval::Lower(eval) | SearchEval::Upper(eval) => {
+        Score::Checkmate(n) => println!("info score mate {}", n / 2),
+        Score::Exact(eval) | Score::Lower(eval) | Score::Upper(eval) => {
             println!("info score cp {}", eval,)
         }
-        SearchEval::Stopped => {
+        Score::Stopped => {
             panic!("info string ERROR: stopped search")
         }
     }
@@ -431,17 +433,20 @@ fn task_engine(tx_main: Sender<MsgToMain>, rx_engine: Receiver<MsgToEngine>) {
                     state.time_lims = msg_box.time_lims;
 
                     let think_start = Instant::now();
-                    let (pv, eval) = best_line(&mut board, &mut state);
+                    let search_res = search(&mut board, &mut state);
 
                     let mut info: Vec<String> = Vec::new();
                     if state.config.nnue_train_info {
-                        let is_quiet =
-                            chess_inator::search::is_quiescent_position(&mut board, eval);
+                        let is_quiet = chess_inator::search::is_quiescent_position(
+                            &mut board,
+                            search_res.eval,
+                        );
                         let is_quiet = if is_quiet { "quiet" } else { "non-quiet" };
 
                         let board_tensor = chess_inator::nnue::InputTensor::from_board(&board);
 
-                        let abs_eval = EvalInt::from(eval) * EvalInt::from(board.get_turn().sign());
+                        let abs_eval =
+                            EvalInt::from(search_res.eval) * EvalInt::from(board.get_turn().sign());
                         info.push(format!("NNUETrainInfo {} {} {}", is_quiet, abs_eval, {
                             board_tensor
                         }))
@@ -454,12 +459,13 @@ fn task_engine(tx_main: Sender<MsgToMain>, rx_engine: Receiver<MsgToEngine>) {
 
                     tx_main
                         .send(MsgToMain::Bestmove(MsgBestmove {
-                            pv,
-                            eval,
+                            pv: search_res.pv,
+                            eval: search_res.eval,
                             info,
                             nodes: state.node_count,
                             nps,
                             time_ms: elapsed_us / 1000,
+                            depth: search_res.depth,
                         }))
                         .unwrap();
                 }

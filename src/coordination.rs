@@ -158,7 +158,7 @@ pub struct MsgBestmove {
     /// Best line (reversed stack; last element is best current move)
     pub pv: PVStack,
     /// Evaluation of the position
-    pub eval: SearchEval,
+    pub eval: Score,
     /// Number of nodes searched
     pub nodes: usize,
     /// Number of nodes searched per second
@@ -167,6 +167,8 @@ pub struct MsgBestmove {
     pub time_ms: usize,
     /// Extra information (displayed as `info string`).
     pub info: Vec<String>,
+    /// Nominal depth searched, in plies.
+    pub depth: usize,
 }
 
 /// Interface messages that may be received by main's channel.
