@@ -159,6 +159,12 @@ pub struct MsgBestmove {
     pub pv: PVStack,
     /// Evaluation of the position
     pub eval: SearchEval,
+    /// Number of nodes searched
+    pub nodes: usize,
+    /// Number of nodes searched per second
+    pub nps: usize,
+    /// Time spent for this search (milliseconds)
+    pub time_ms: usize,
     /// Extra information (displayed as `info string`).
     pub info: Vec<String>,
 }

@@ -40,6 +40,7 @@ use std::ops::Not;
 use std::process::exit;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::thread;
+use std::time::Instant;
 
 /// UCI protocol says to ignore any unknown words.
 ///
@@ -357,13 +358,15 @@ fn cmd_root(mut tokens: std::str::SplitWhitespace<'_>, state: &mut MainState) {
 /// Format a bestmove.
 fn outp_bestmove(bestmove: MsgBestmove) {
     println!(
-        "info pv{}",
+        "info time {} pv{}",
+        bestmove.time_ms,
         bestmove
             .pv
             .iter()
             .map(|mv| mv.to_uci_algebraic())
             .fold(String::new(), |a, b| a + " " + &b)
     );
+    println!("info nodes {} nps {}", bestmove.nodes, bestmove.nps,);
     match bestmove.eval {
         SearchEval::Checkmate(n) => println!("info score mate {}", n / 2),
         SearchEval::Exact(eval) | SearchEval::Lower(eval) | SearchEval::Upper(eval) => {
@@ -423,8 +426,11 @@ fn task_engine(tx_main: Sender<MsgToMain>, rx_engine: Receiver<MsgToEngine>) {
             match msg {
                 MsgToEngine::Configure(cfg) => state.config = cfg,
                 MsgToEngine::Go(msg_box) => {
+                    state.node_count = 0;
                     let mut board = msg_box.board;
                     state.time_lims = msg_box.time_lims;
+
+                    let think_start = Instant::now();
                     let (pv, eval) = best_line(&mut board, &mut state);
 
                     let mut info: Vec<String> = Vec::new();
@@ -441,8 +447,18 @@ fn task_engine(tx_main: Sender<MsgToMain>, rx_engine: Receiver<MsgToEngine>) {
                         }))
                     }
 
+                    let elapsed_ms = think_start.elapsed().as_millis() as usize;
+                    let nps = state.node_count.saturating_mul(1000) / elapsed_ms;
+
                     tx_main
-                        .send(MsgToMain::Bestmove(MsgBestmove { pv, eval, info }))
+                        .send(MsgToMain::Bestmove(MsgBestmove {
+                            pv,
+                            eval,
+                            info,
+                            nodes: state.node_count,
+                            nps,
+                            time_ms: elapsed_ms,
+                        }))
                         .unwrap();
                 }
                 MsgToEngine::Stop => {}
