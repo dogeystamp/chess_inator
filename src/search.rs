@@ -28,7 +28,7 @@ const EVAL_WORST: EvalInt = -(EVAL_BEST);
 pub const MAX_PLY: usize = 128;
 
 /// Depth equivalent to one ply (because fractional plies exist)
-pub const ONE_PLY: usize = 2;
+pub const ONE_PLY: usize = 1;
 
 /// Number of moves to keep in the killer moves table
 const KILLER_TABLE_MOVES: usize = 2;
@@ -383,7 +383,7 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Optio
     let beta = mm.beta.unwrap_or(EVAL_BEST);
 
     // R parameter
-    const NULL_MOVE_REDUCTION: usize = 2 * ONE_PLY + 1;
+    const NULL_MOVE_REDUCTION: usize = 2 * ONE_PLY;
     // if our current board is already worse than beta, then null move will often not prune
     let do_null_move = do_null_move && board_eval.unwrap() >= EvalInt::from(beta);
 
