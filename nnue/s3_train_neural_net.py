@@ -70,7 +70,7 @@ LEARN_RATE = 1e-3
 BATCH_SIZE = 16384
 BIG_BATCH_SIZE = 2**22
 
-EPOCHS = 5
+EPOCHS = 10
 
 # neural net architecture
 
