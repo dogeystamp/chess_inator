@@ -622,7 +622,7 @@ pub struct AntiNullMove {
 }
 
 /// Extra information about the board.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct BoardInformation {
     /// Number of minor and major pieces, i.e. queens rooks bishops and knights.
     n_min_maj_pcs: u8,
@@ -631,6 +631,15 @@ pub struct BoardInformation {
     /// The target (destination) square of the last move.
     last_target: Option<Square>,
 }
+
+impl PartialEq for BoardInformation {
+    fn eq(&self, _other: &Self) -> bool {
+        // don't compare. history / information should not matter for equality
+        true
+    }
+}
+
+impl Eq for BoardInformation {}
 
 impl BoardInformation {
     pub fn add_piece(&mut self, pc: ColPiece, _sq: Square) {
