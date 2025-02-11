@@ -628,6 +628,8 @@ pub struct BoardInformation {
     n_min_maj_pcs: u8,
     /// Number of pawns on the board
     n_pawns: u8,
+    /// The target (destination) square of the last move.
+    last_target: Option<Square>,
 }
 
 impl BoardInformation {

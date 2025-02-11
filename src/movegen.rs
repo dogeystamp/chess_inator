@@ -101,6 +101,8 @@ pub struct AntiMove {
     castle: CastleRights,
     /// En passant target square prior to this move.
     ep_square: Option<Square>,
+    /// Last target square prior to this move (see [`crate::BoardInformation`]).
+    last_target: Option<Square>,
 }
 
 impl AntiMove {
@@ -124,6 +126,7 @@ impl AntiMove {
         pos.irreversible_half = self.half_moves;
         pos.castle = self.castle;
         pos.ep_square = self.ep_square;
+        pos.info.last_target = self.last_target;
 
         /// Restore captured piece at a given square.
         macro_rules! cap_sq {
@@ -218,6 +221,7 @@ impl Move {
             half_moves: pos.irreversible_half,
             castle: pos.castle,
             ep_square: pos.ep_square,
+            last_target: Some(self.dest),
         };
 
         if update_metrics {

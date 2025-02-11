@@ -178,23 +178,49 @@ fn move_priority(
     mm: &MinmaxState,
     mv: &Move,
     state: &mut EngineState,
+    hash_mv: Option<Move>,
 ) -> EvalInt {
     // move eval
     let mut eval: EvalInt = 0;
+
+    // hash moves go first
+    if let Some(hash_mv) = hash_mv {
+        if hash_mv == *mv {
+            return EVAL_BEST;
+        }
+    }
+
+    // try the move to see how the hash table likes it
     let src_pc = board.get_piece(mv.src).unwrap();
     let anti_mv = mv.make(board);
+
+    let mut is_mate_score = false;
 
     if state.config.enable_trans_table {
         if let Some(entry) = &state.cache[board.zobrist] {
             eval = entry.eval.into();
+            if !matches!(entry.eval, Score::Checkmate(_)) {
+                is_mate_score = true;
+            }
         }
     }
 
-    if state.killer_table.probe(mv, mm.plies) {
-        eval += 8000;
-    } else if let Some(cap_pc) = anti_mv.cap {
-        // least valuable victim, most valuable attacker
-        eval += lvv_mva_eval(src_pc.into(), cap_pc)
+    if !is_mate_score {
+        if let Some(last_target) = board.info.last_target {
+            if last_target == mv.dest {
+                // the engine will probably do stupid things like hang pieces. because of that,
+                // capturing the recently moved piece is a good heuristic for move ordering; we
+                // quickly refute bad moves.
+                eval = eval.saturating_add(150)
+            }
+        }
+
+        if state.killer_table.probe(mv, mm.plies) {
+            eval = eval.saturating_add(7000);
+        } else if let Some(cap_pc) = anti_mv.cap {
+            // least valuable victim, most valuable attacker
+            eval = eval.saturating_add(lvv_mva_eval(src_pc.into(), cap_pc));
+        }
     }
 
     anti_mv.unmake(board);
@@ -440,12 +466,8 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Optio
 
     let mut mvs: ArrayVec<{ crate::movegen::MAX_MOVES }, _> = mvs
         .into_iter()
-        .map(|mv| (move_priority(board, &mm, &mv, state), mv))
+        .map(|mv| (move_priority(board, &mm, &mv, state, trans_table_move), mv))
         .collect();
-
-    if let Some(trans_table_move) = trans_table_move {
-        mvs.push((EVAL_BEST, trans_table_move))
-    }
 
     // sort moves by decreasing priority
     mvs.sort_unstable_by_key(|mv| -mv.0);
@@ -478,7 +500,7 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Optio
             } else {
                 // return very bad score, but not checkmate, because checkmate is handled specially
                 (None, Score::Exact(board_eval.unwrap().saturating_sub(2000)))
-            }
+            };
         }
 
         if is_in_check {
