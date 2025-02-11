@@ -65,38 +65,6 @@ For efficiency reasons, the network is also quantized to `int16` after
 training. This provides a considerable speed-up compared to `float64`, which is
 used during training.
 
-## training process / history
-
-The engine's neural network is trained on chess positions labelled with:
-
-- board state
-- a centipawn evaluation given by a prior version of the engine
-- the real outcome (win/draw/loss) of the game
-
-The real outcome is interpolated with the engine evaluation to give an
-"expected evaluation" for the position, and that the engine trains on.
-By labelling the position with the real game outcome, the engine gets
-feedback on positions that are good and bad.
-
-Here is a log of the machine learning used to train the engine, and the
-source of the data being used. See the [NNUE readme](./nnue/README.md) for
-technical details about the training pipeline.
-
-- **Generation 1** (branch `hce`): based on a naive hand-crafted evaluation. It
-  implements material counting, as well as a very simple (i.e. I punched in
-  numbers myself) piece-square table evaluation.
-- **Generation 2:** (tag `nnue2`) is neural-network based, and is trained on
-  positions from the [Lichess elite database](https://database.nikonoel.fr/),
-  October 2024. These positions were scored using gen 1's evaluation.
-- **Generation 3:** (tag `nnue3-192`) increases the hidden layer size from 16
-  to 192 neurons. It is trained on Lichess elite database positions (September
-  2024), scored by gen 2's evaluation.
-- **Generation 4:** (tag `nnue4-320`) has 320 hidden layer neurons, and is
-  trained from gen 3's evaluation of around 18 million Lichess elite
-  database positions (June & July 2024).
-- **Generation 5:** (tag `nnue05a-320`) is derived from gen 4, fine-tuned on
-  roughly 3 million self-play games.
-
 ## development instructions
 
 The following are instructions to run the engine locally (on a development
@@ -143,3 +111,156 @@ This project would not have been possible without the following:
 - [Bullet NNUE docs](https://github.com/jw1912/bullet/blob/main/docs/1-basics.md): helpful in understanding NNUE
 - [PyTorch](https://pytorch.org/): network training framework
 - [Rust](https://www.rust-lang.org/): great language
+
+## training process / history
+
+The engine's neural network is trained on chess positions labelled with:
+
+- board state
+- a centipawn evaluation given by a prior version of the engine
+- the real outcome (win/draw/loss) of the game
+
+The real outcome is interpolated with the engine evaluation to give an
+"expected evaluation" for the position, on which the engine trains.
+By labelling the position with the real game outcome, the engine gets
+feedback on positions that are good and bad.
+
+<table>
+    <thead>
+        <tr>
+            <th>Name</th>
+            <th>Tag</th>
+            <th>Description</th>
+            <th>Notes</th>
+        </tr>
+    </thead>
+    <tbody>
+<tr>
+<td>Generation 1</td>
+<td>
+
+`hce`
+
+</td>
+<td>
+
+Hand-crafted evaluation. Has material counting and very simple (i.e. I punched in numbers)
+piece-square table evaluation.
+
+</td>
+<td>No data available.</td>
+</tr>
+
+
+
+<tr>
+<td>Generation 2</td>
+<td>
+
+`nnue2`
+
+</td>
+<td>
+
+First neural network. Trained on 
+the [Lichess elite database](https://database.nikonoel.fr/),
+October 2024. Positions were scored using gen 1's evaluation.
+
+</td>
+<td>No data available.</td>
+</tr>
+
+
+<tr>
+<td>Generation 3</td>
+<td>
+
+`nnue3-192`
+
+</td>
+<td>
+
+Hidden layer size increased from 16 to 192 neurons.
+Trained on Lichess elite database, September 2024,
+using gen 2's evaluation.
+
+</td>
+<td>No data available.</td>
+</tr>
+
+
+<tr>
+<td>Generation 4</td>
+<td>
+
+`nnue4-320`
+
+</td>
+<td>
+
+Hidden layer size increased from to 320 neurons.
+Trained on Lichess elite database, June & July 2024,
+using gen 3's evaluation. Used around 18 million
+positions for training.
+
+</td>
+<td>
+
+```
+nnue4-320 (fb66aa8) vs c_i pvs12-5 (06d195b)
+nElo: 56.67 +/- 25.56
+Games: 710, Wins: 371, Losses: 260, Draws: 79
+```
+
+</td>
+</tr>
+
+
+<tr>
+<td>Generation 5</td>
+<td>
+
+`nnue5a-320`
+
+</td>
+<td>
+
+Fine-tuned gen 4 on 3 million self-play positions.
+
+</td>
+<td>
+
+```
+c_i nnue05a-320 (560a7c6) vs c_i hash-non-two (2c4a38f)
+nElo: 34.67 +/- 19.56
+Games: 1212, Wins: 574, Losses: 463, Draws: 175
+```
+
+</td>
+</tr>
+
+
+<tr>
+<td>Generation 6</td>
+<td>
+
+`nnue6a-320`
+
+</td>
+<td>
+
+Fine-tuned gen 5 on 2 million self-play positions.
+
+</td>
+<td>
+
+```
+c_i nnue06a-320 (69b196d) vs c_i check-handling3 (ef178a3)
+nElo: 32.75 +/- 18.97
+Games: 1288, Wins: 596, Losses: 486, Draws: 206
+```
+
+</td>
+</tr>
+    </tbody>
+</table>
