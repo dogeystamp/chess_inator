@@ -489,15 +489,26 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Optio
         }
     }
 
-    for (_priority, mv) in mvs {
+    for (move_idx, (_priority, mv)) in mvs.iter().enumerate() {
         let anti_mv = mv.make(board);
 
         // only use null window when we have move ordering through the transposition table
         let do_null_window = !is_next_pv && trans_table_move.is_some() && mm.depth > 2;
 
+        // quiet late moves are reduced
+        let do_late_move_reduction = move_idx > 16 && anti_mv.cap.is_none();
+
+        let reduction = if do_extension {
+            0
+        } else if do_late_move_reduction {
+            1
+        } else {
+            0
+        };
+
         let new_depth = mm
             .depth
-            .saturating_sub(if do_extension { 0 } else { ONE_PLY });
+            .saturating_sub(if do_extension { 0 } else { ONE_PLY * (1 + reduction) });
 
         let (_, mut score) = minmax(
             board,
@@ -551,7 +562,7 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Optio
         let abs_score = score.increment();
         if abs_score > abs_best {
             abs_best = abs_score;
-            best_move = Some(mv);
+            best_move = Some(*mv);
         }
         if EvalInt::from(abs_best) > alpha {
             alpha = abs_best.into();
@@ -811,17 +822,17 @@ impl<const N: usize> KillerMoves<N> {
 
     /// Insert a move into the killer move table.
     /// Does not duplicate moves.
-    fn write_mv(&mut self, mv: Move, ply: usize) {
+    fn write_mv(&mut self, mv: &Move, ply: usize) {
         // offset moves to make space (possibly overwrite later moves)
         if let Some(existing_mv) = self.mvs[ply][0] {
-            if existing_mv == mv {
+            if existing_mv == *mv {
                 return;
             }
         }
         for i in 1..N {
             self.mvs[ply][i] = self.mvs[ply][i - 1];
         }
-        self.mvs[ply][0] = Some(mv);
+        self.mvs[ply][0] = Some(*mv);
     }
 }
 
