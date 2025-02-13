@@ -492,26 +492,29 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Optio
     for (move_idx, (_priority, mv)) in mvs.iter().enumerate() {
         let anti_mv = mv.make(board);
 
-        // only use null window when we have move ordering through the transposition table
-        let do_null_window = !is_next_pv && trans_table_move.is_some() && mm.depth > 2;
+        let mut reduction = 0;
+
+        // after how many moves does late move reduction kick in
+        const LMR_THRESH: usize = 4;
+        // how much to reduce by in LMR
+        const LMR_R: usize = ONE_PLY * 2;
 
         // quiet late moves are reduced
         let do_late_move_reduction =
-            !is_pv && move_idx > 3 && anti_mv.cap.is_none() && mm.depth > 2;
+            !is_pv && move_idx >= LMR_THRESH && anti_mv.cap.is_none() && !do_extension && mm.depth > 2 * ONE_PLY;
 
-        let reduction = if do_extension {
-            0
-        } else if do_late_move_reduction {
-            ONE_PLY * 2
-        } else {
-            0
-        };
+        if do_late_move_reduction {
+            reduction += LMR_R
+        }
 
         let new_depth = mm
             .depth
             .saturating_sub(if do_extension { 0 } else { ONE_PLY });
 
         let reduced_depth = new_depth.saturating_sub(reduction);
+
+        // only use null window when we have move ordering through the transposition table
+        let do_null_window = !is_next_pv && trans_table_move.is_some() && mm.depth > 2;
 
         let (_, mut score) = minmax(
             board,
