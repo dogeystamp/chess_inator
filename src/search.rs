@@ -478,7 +478,7 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Optio
             } else {
                 // return very bad score, but not checkmate, because checkmate is handled specially
                 (None, Score::Exact(board_eval.unwrap().saturating_sub(2000)))
-            }
+            };
         }
 
         if is_in_check {
@@ -496,25 +496,28 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Optio
         let do_null_window = !is_next_pv && trans_table_move.is_some() && mm.depth > 2;
 
         // quiet late moves are reduced
-        let do_late_move_reduction = move_idx > 16 && anti_mv.cap.is_none();
+        let do_late_move_reduction =
+            !is_pv && move_idx > 3 && anti_mv.cap.is_none() && mm.depth > 2;
 
         let reduction = if do_extension {
             0
         } else if do_late_move_reduction {
-            1
+            ONE_PLY * 2
         } else {
             0
         };
 
         let new_depth = mm
             .depth
-            .saturating_sub(if do_extension { 0 } else { ONE_PLY * (1 + reduction) });
+            .saturating_sub(if do_extension { 0 } else { ONE_PLY });
+
+        let reduced_depth = new_depth.saturating_sub(reduction);
 
         let (_, mut score) = minmax(
             board,
             state,
             MinmaxState {
-                depth: new_depth,
+                depth: reduced_depth,
                 alpha: Some(if do_null_window { -(alpha + 1) } else { -beta }),
                 beta: Some(-alpha),
                 plies: mm.plies + 1,
@@ -528,11 +531,39 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Optio
                 },
             },
         );
+        score = score.increment();
+
+        if reduction > 0 {
+            if let Score::Lower(cp) = score {
+                if alpha <= cp {
+                    // a reduced move is not supposed to good; if we are better than alpha,
+                    // we should probably re-search to get an accurate evaluation of the move
+                    (_, score) = minmax(
+                        board,
+                        state,
+                        MinmaxState {
+                            depth: new_depth,
+                            // still null-window
+                            alpha: Some(if do_null_window { -(alpha + 1) } else { -beta }),
+                            beta: Some(-alpha),
+                            plies: mm.plies + 1,
+                            quiesce: mm.quiesce,
+                            allow_null_mv: true,
+                            node_type: NodeType::PV,
+                        },
+                    );
+                    score = score.increment();
+                }
+            }
+        }
 
         if do_null_window {
-            let abs_score = score.increment();
-            if let Score::Lower(cp) = abs_score {
+            if let Score::Lower(cp) = score {
                 if alpha <= cp && cp <= beta {
+                    // at this point, either:
+                    // - there was no reduction, and we did null window, and it failed high
+                    // - there was a reduction, and it failed high, and the null-window re-search failed high as well
+
                     // alpha means this move was better than expected, so re-search with full window
                     // if it's above beta then don't even bother re-searching, it causes a cutoff
                     (_, score) = minmax(
@@ -548,6 +579,7 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Optio
                             node_type: NodeType::PV,
                         },
                     );
+                    score = score.increment();
                 }
             }
         }
@@ -559,9 +591,8 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Optio
             return (None, Score::Stopped);
         }
 
-        let abs_score = score.increment();
-        if abs_score > abs_best {
-            abs_best = abs_score;
+        if score > abs_best {
+            abs_best = score;
             best_move = Some(*mv);
         }
         if EvalInt::from(abs_best) > alpha {
