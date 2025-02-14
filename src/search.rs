@@ -499,9 +499,15 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Optio
         // how much to reduce by in LMR
         const LMR_R: usize = ONE_PLY;
 
-        // quiet late moves are reduced
-        let do_late_move_reduction =
-            !is_pv && move_idx >= LMR_THRESH && anti_mv.cap.is_none() && !do_extension && mm.depth > 2 * ONE_PLY;
+        let do_late_move_reduction = !is_pv
+            && move_idx >= LMR_THRESH
+            // quiet moves only
+            && anti_mv.cap.is_none()
+            // do not reduce extended moves
+            && !do_extension
+            && mm.depth > 2 * ONE_PLY
+            // only reduce when we have move ordering via transposition table
+            && trans_table_move.is_some();
 
         if do_late_move_reduction {
             reduction += LMR_R
