@@ -497,7 +497,7 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Optio
         // after how many moves does late move reduction kick in
         const LMR_THRESH: usize = 4;
         // how much to reduce by in LMR
-        const LMR_R: usize = ONE_PLY * 2;
+        const LMR_R: usize = ONE_PLY;
 
         // quiet late moves are reduced
         let do_late_move_reduction =
