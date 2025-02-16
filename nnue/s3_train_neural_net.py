@@ -12,12 +12,10 @@
 """
 Train the NNUE weights.
 
-Due to memory concerns, the training data is split into individual datasets
-(each has `BIG_BATCH_SIZE` rows). Each of these datasets has its train/test,
-and each dataset will be used for `EPOCHS` epochs.
+A helpful paper for finding good hyperparameters:
+https://arxiv.org/abs/1803.09820
 """
 
-import itertools
 import math
 from typing import Iterable
 import torch
@@ -66,11 +64,16 @@ value should work. For a smarter engine, use a higher value, like 0.97, so that
 it can go through reinforcement learning based on its existing knowledge.
 """
 
-LEARN_RATE = 1e-3
-BATCH_SIZE = 16384
+LEARN_RATE = 1e-6
+WEIGHT_DECAY = 0.01
+BATCH_SIZE = 8192
+# this test batch size is the best performance on hardware.
+# but for training, we might want lower batch sizes to avoid overfitting
+TEST_BATCH_SIZE = 16384
 BIG_BATCH_SIZE = 2**22
 
-EPOCHS = 10
+# early stopping may cut training off before this
+EPOCHS = 50
 
 # neural net architecture
 
@@ -106,6 +109,11 @@ parser.add_argument(
     type=Path,
     help="Path to load training data from (expects .tsv.gz format).",
     default=Path("combined_training.tsv.gz"),
+)
+parser.add_argument(
+    "--test-dataset",
+    type=Path,
+    help="Path to load separate test data from (expects .tsv.gz format). If not specified, data will be picked from the training set (may result in worse performance.)",
 )
 parser.add_argument(
     "--save",
@@ -252,7 +260,7 @@ class ChessPositionDataset(Dataset):
                 delimiter="\t",
                 chunksize=CHUNK_SIZE,
                 skiprows=self.cur_big_batch * BIG_BATCH_SIZE,
-                nrows=BIG_BATCH_SIZE,
+                nrows=min(BIG_BATCH_SIZE, self.limit_rows or BIG_BATCH_SIZE),
             ),
             desc="READ BIG BATCH",
             total=math.ceil(BIG_BATCH_SIZE / CHUNK_SIZE),
@@ -287,12 +295,17 @@ class ChessPositionDataset(Dataset):
         df = pd.DataFrame(output)
         return df
 
-    def __init__(self, data_file: Path, cur_big_batch: int):
+    def __init__(
+        self, data_file: Path, cur_big_batch: int, limit_rows: int | None = None
+    ):
         self.total_rows = 0
         self.data_file = data_file
 
         self.cur_big_batch = cur_big_batch
         """Index of the big batch to load."""
+
+        self.limit_rows = limit_rows
+        """Maximum amount of rows to read."""
 
         self.data = self.__chunked_reader()
 
@@ -404,6 +417,53 @@ def tune_sigmoid(cp, wdl) -> np.double:
 ## neural net architecture
 ################################
 ################################
+
+
+class EarlyStop:
+    """
+    Module to halt training when there is no longer any improvement.
+
+    Arguments
+    ---------
+    patience: how many epochs without improvement to tolerate before stopping
+    """
+
+    def __init__(self, patience: int = 3):
+        self.patience = patience
+        self.bad_epochs = 0
+        self.best_model_state = None
+        self.best_loss = None
+
+    def step(self, test_loss, model) -> None:
+        """Given a model and its validation loss, update the early stopping state."""
+        if not self.best_loss or self.best_loss > test_loss:
+            self.best_model_state = model.state_dict()
+            self.best_loss = test_loss
+            self.bad_epochs = 0
+            logging.info("Model performance is current best.")
+        else:
+            self.bad_epochs += 1
+
+    def is_early_stop(self) -> bool:
+        """If true, halt the training."""
+        return self.bad_epochs > self.patience
+
+    def load_best_model(self, model):
+        model.load_state_dict(self.best_model_state)
+
+    def state_dict(self):
+        return dict(
+            patience=self.patience,
+            bad_epochs=self.bad_epochs,
+            best_model_state=self.best_model_state,
+            best_loss=float(self.best_loss) if self.best_loss else None,
+        )
+
+    def load_state_dict(self, state):
+        self.patience = state["patience"]
+        self.bad_epochs = state["bad_epochs"]
+        self.best_model_state = state["best_model"]
+        self.best_loss = np.double(state["best_loss"]) 
 
 
 class CReLU(nn.Module):
@@ -543,7 +603,7 @@ def test_loop(dataloader, model, loss_fn) -> np.double:
             dataloader,
             desc=" TEST LOOP",
             unit="batch",
-            postfix=dict(batch_sz=BATCH_SIZE),
+            postfix=dict(batch_sz=TEST_BATCH_SIZE),
         ):
             x, y = batch
             pred = model(x)
@@ -584,6 +644,7 @@ def train(
     save_path: Path | None = None,
     load_path: Path | None = None,
     log_path: Path | None = None,
+    test_dataset_path: Path | None = None,
 ):
     """
     Train the model's parameters.
@@ -592,7 +653,9 @@ def train(
     logging.info("Using device '%s' for training.", device)
 
     loss_fn = torch.nn.MSELoss()
-    optimizer = torch.optim.AdamW(model.parameters(), lr=LEARN_RATE)
+    optimizer = torch.optim.AdamW(
+        model.parameters(), lr=LEARN_RATE, weight_decay=WEIGHT_DECAY
+    )
     scheduler = torch.optim.lr_scheduler.LinearLR(
         optimizer, start_factor=1.0, end_factor=1.0, total_iters=8
     )
@@ -604,12 +667,30 @@ def train(
         saved_epoch = load_model(load_path, model, optimizer, scheduler)
         if saved_epoch is not None:
             last_big_epoch, last_epoch = divmod(saved_epoch, EPOCHS)
-            big_epoch_start, epoch_start = divmod(saved_epoch+1, EPOCHS)
+            big_epoch_start, epoch_start = divmod(saved_epoch + 1, EPOCHS)
             logging.info(
                 "Last session ended with big batch %d, epoch %d.",
                 last_big_epoch + 1,
                 last_epoch + 1,
             )
+
+    separate_test_dataset = None
+
+    early_stopper = EarlyStop()
+
+    if test_dataset_path and test_dataset_path.is_file():
+        logging.info("Loading separate test dataset from '%s'...", test_dataset_path)
+        separate_test_dataset = ChessPositionDataset(test_dataset_path, 0, 2**18)
+        test_dataloader = DataLoader(
+            separate_test_dataset,
+            num_workers=NUM_WORKERS,
+            batch_size=BATCH_SIZE,
+            shuffle=False,
+        )
+        test_loss = test_loop(test_dataloader, model, loss_fn)
+        logging.info("Initial TEST loss is: %s", test_loss)
+        early_stopper.step(test_loss, model)
+
 
     big_batch_loader = BigBatchLoader(args.datafile, big_epoch_start)
     for big_batch_idx, big_batch in big_batch_loader.big_batches():
@@ -617,9 +698,14 @@ def train(
         model.k = big_batch.k
 
         generator = torch.Generator().manual_seed(42)
-        train_dataset, test_dataset = torch.utils.data.random_split(
-            big_batch, [0.97, 0.03], generator=generator
-        )
+        if separate_test_dataset:
+            train_dataset = big_batch
+            test_dataset = separate_test_dataset
+        else:
+            logging.warning("Using random split for test/train data; prefer a separate test dataset (--test-dataset) instead.")
+            train_dataset, test_dataset = torch.utils.data.random_split(
+                big_batch, [0.97, 0.03], generator=generator
+            )
 
         train_dataloader = DataLoader(
             train_dataset,
@@ -631,7 +717,7 @@ def train(
             test_dataset,
             num_workers=NUM_WORKERS,
             batch_size=BATCH_SIZE,
-            shuffle=True,
+            shuffle=False,
         )
 
         for epoch_idx in range(epoch_start, EPOCHS):
@@ -647,15 +733,18 @@ def train(
 
             print(f"\navg TRAIN loss: {train_loss:>5f}")
             print(f"avg  TEST loss: {test_loss:>5f}\n")
+
             if save_path:
                 save_model(
                     save_path,
-                    model,
+                    model.state_dict(),
                     optimizer,
                     scheduler,
                     total_epoch,
+                    early_stop=early_stopper,
                 )
                 logging.info("Saved progress to '%s'.", save_path)
+
             if log_path:
                 if not log_path.exists():
                     with log_path.open("w") as f:
@@ -665,7 +754,17 @@ def train(
                     writer = csv.writer(f)
                     writer.writerow([total_epoch, train_loss, test_loss])
 
+            early_stopper.step(test_loss, model)
+
+            if early_stopper.is_early_stop():
+                print(
+                    "Performing early stop because TEST loss did not decrease enough."
+                )
+                break
+
         epoch_start = 0
+
+    early_stopper.load_best_model(model)
 
 
 def visualize_train_log(log_path: Path = Path("log_training.csv")):
@@ -681,7 +780,7 @@ def visualize_train_log(log_path: Path = Path("log_training.csv")):
 
     print(df)
 
-    max_v = max(df["test_loss"].values.max(), df["train_loss"].values.max()) # type: ignore
+    max_v = max(df["test_loss"].values.max(), df["train_loss"].values.max())  # type: ignore
 
     for i in range(0, end_epoch + 1, EPOCHS):
         plt.plot([i, i], [0, max_v], linestyle="dashed", color="gray")
@@ -705,8 +804,10 @@ def visualize_train_log(log_path: Path = Path("log_training.csv")):
 def load_model(
     load_path: Path,
     model: NNUE,
-    optimizer: torch.optim.Optimizer | None,
-    scheduler: torch.optim.lr_scheduler.LRScheduler | None,
+    optimizer: torch.optim.Optimizer | None = None,
+    scheduler: torch.optim.lr_scheduler.LRScheduler | None = None,
+    early_stop: EarlyStop | None = None,
+    load_best: bool = True,
 ) -> int | None:
     """
     Load a model checkpoint.
@@ -739,7 +840,13 @@ def load_model(
                 raise ValueError(
                     f"Tried to load from specific arch '{arch_s}', but was expecting '{model.arch_specific}'. There is a version mismatch."
                 )
-    model.load_state_dict(checkpoint["model_state_dict"])
+    if load_best and checkpoint.get("early_stop"):
+        logging.info("Loading best model state from early stopper.")
+        model.load_state_dict(checkpoint["early_stop"]["best_model_state"])
+    else:
+        logging.info("Loading last model state.")
+        model.load_state_dict(checkpoint["model_state_dict"])
+
     model.k = model.k or checkpoint["k"].detach().numpy().item()
     if not model.k:
         raise ValueError("Missing the sigmoid K parameter.")
@@ -749,6 +856,9 @@ def load_model(
     if scheduler:
         if state := checkpoint["scheduler_state_dict"]:
             scheduler.load_state_dict(state)
+    if early_stop:
+        if state := checkpoint["early_stop"]:
+            early_stop.load_state_dict(state)
     model.l1_size = checkpoint.get("l1_size") or model.l1_size
     if "args" in globals() and args.force_epochs:
         return None
@@ -758,10 +868,11 @@ def load_model(
 
 def save_model(
     save_path: Path,
-    model: NNUE,
-    optimizer: torch.optim.Optimizer | None,
-    scheduler: torch.optim.lr_scheduler.LRScheduler | None,
-    epoch: int | None,
+    model_state,
+    optimizer: torch.optim.Optimizer | None = None,
+    scheduler: torch.optim.lr_scheduler.LRScheduler | None = None,
+    epoch: int | None = None,
+    early_stop: EarlyStop | None = None,
 ):
     """Save a model as a checkpoint."""
 
@@ -770,7 +881,7 @@ def save_model(
 
     torch.save(
         dict(
-            model_state_dict=model.state_dict(),
+            model_state_dict=model_state,
             scheduler_state_dict=scheduler_state,
             optimizer_state_dict=optim_state,
             epoch=epoch,
@@ -778,6 +889,7 @@ def save_model(
             arch=model.arch,
             arch_specific=model.arch_specific,
             l1_size=HIDDEN_SIZE,
+            early_stop=early_stop.state_dict() if early_stop else None,
         ),
         save_path,
     )
@@ -792,4 +904,4 @@ if __name__ == "__main__":
 
     model = NNUE()
     model.to(device)
-    train(model, args.save, args.load, args.log)
+    train(model, args.save, args.load, args.log, args.test_dataset)

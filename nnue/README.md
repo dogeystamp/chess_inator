@@ -1,7 +1,10 @@
 # NNUE training tools
 
 Python training pipeline for the evaluation neural network.
-See the docstring in `src/nnue.rs` for information about the architecture of the NNUE.
+See the docstring in `src/nnue.rs` for information about the architecture of the NNUE,
+as well as the top-level README.
+
+## pipeline
 
 Required packages:
 - pandas
@@ -38,9 +41,11 @@ Example training pipeline:
 
 # analyze batches to turn them into training data. outputs by default to
 # train_data/batch%d.tsv.gz. set max-workers to the number of hardware threads /
-# cores you have. this is the longest part. you may interrupt and resume this
-# process, at the cost of possibly discarding a partially done batch.
+# cores you have. you may interrupt and resume this process, at the cost of possibly
+# discarding a partially done batch.
 ./s2_process_pgn_data.py --engine ../target/release/chess_inator --max-workers 8 batches/batch*.pgn
+# make a separate test set batch (optional, highly recommended)
+./s2_process_pgn_data.py --engine ../target/release/chess_inator --max-workers 8 test_dataset.pgn
 
 # combine all processed data into a single training set file.
 # gzip files can be concatenated directly like this.
@@ -49,7 +54,11 @@ cat train_data/*.tsv.gz > combined_training.tsv.gz
 # optimize a neural network, saving weights (by default) to `weights[...].pth`.
 # this process may be interrupted and resumed, at the cost of losing an
 # unfinished epoch.
-./s3_train_neural_net.py combined_training.tsv.gz --log log_training.csv
+#
+# the --test-data flag is optional, but without a separate test dataset there
+# probably will be leakage (positions from the same game might be in both
+# testing and training data sets)
+./s3_train_neural_net.py combined_training.tsv.gz --log log_training.csv --test-data train_data/test_dataset.tsv.gz
 
 # convert the finished weights to `.bin` format
 ./s4_weights_to_bin.py weights.pth
