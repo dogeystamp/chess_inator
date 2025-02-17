@@ -440,6 +440,15 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Optio
 
     let mut mvs: ArrayVec<{ crate::movegen::MAX_MOVES }, _> = mvs
         .into_iter()
+        .filter(|mv| {
+            if let Some(hash_mv) = trans_table_move {
+                // we're going to directly push the transposition table move later,
+                // so don't include it in the normal list
+                *mv != hash_mv
+            } else {
+                true
+            }
+        })
         .map(|mv| (move_priority(board, &mm, &mv, state), mv))
         .collect();
 
