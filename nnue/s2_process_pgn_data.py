@@ -151,12 +151,13 @@ async def worker(game_generator: AsyncIterator[pgn.Game]) -> None:
         skipped = 0
 
         logging.info(
-            "Processing game %s, %s (%s) between %s as White and %s as Black.",
+            "Processing game %s, %s (%s) between %s as White and %s as Black, round %s.",
             game.headers["Event"],
             game.headers["Site"],
             game.headers["Date"],
             game.headers["White"],
             game.headers["Black"],
+            game.headers["Round"],
         )
 
         for move in game.mainline_moves():
