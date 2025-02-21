@@ -60,10 +60,10 @@ impl Zobrist {
 
     /// Toggle castle rights key.
     pub(crate) fn toggle_castle(&mut self, castle: &CastleRights) {
-        let bits = ((0x1) & castle.0[0].k as u8)
-            | ((0x2) & castle.0[0].q as u8)
-            | (0x4) & castle.0[1].k as u8
-            | (0x8) & castle.0[1].q as u8;
+        let bits = (castle.0[0].k as u8)
+            | (castle.0[0].q as u8) << 1
+            | (castle.0[1].k as u8) << 2
+            | (castle.0[1].q as u8) << 3;
 
         self.hash ^= CASTLE_KEYS[bits as usize];
     }
