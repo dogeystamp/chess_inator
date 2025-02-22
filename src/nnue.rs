@@ -195,15 +195,6 @@ pub(crate) struct Nnue {
     l1: [Param; L1_SIZE],
 }
 
-impl PartialEq for Nnue {
-    /// Neural net shouldn't affect board equality, so set always equal
-    fn eq(&self, _other: &Self) -> bool {
-        true
-    }
-}
-
-impl Eq for Nnue {}
-
 pub(crate) fn crelu(x: Param) -> Param {
     x.clamp(0, L1_SCALE)
 }
@@ -388,15 +379,6 @@ impl NnueHistory {
         }
     }
 }
-
-impl PartialEq for NnueHistory {
-    /// Always equal, since comparing two boards with different histories shouldn't matter.
-    fn eq(&self, _other: &Self) -> bool {
-        true
-    }
-}
-
-impl Eq for NnueHistory {}
 
 impl Default for NnueHistory {
     fn default() -> Self {

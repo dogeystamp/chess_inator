@@ -242,7 +242,7 @@ impl FromFen for Board {
         // parser is always ready to receive another full move digit,
         // so there is no real "stop" state
         if matches!(parser_state, FenState::FullMove) {
-            pos.plies = full_moves * 2
+            pos.root_plies = full_moves * 2
                 + match pos.turn {
                     Color::White => 0,
                     Color::Black => 1,
@@ -294,7 +294,7 @@ impl ToFen for Board {
             None => "-".to_string(),
         };
         let half_move = self.irreversible_half.to_string();
-        let full_move = (self.plies / 2).to_string();
+        let full_move = ((self.plies + self.root_plies) / 2).to_string();
 
         format!("{pieces_str} {turn} {castle} {ep_square} {half_move} {full_move}")
     }
@@ -422,10 +422,10 @@ mod tests {
         for i in 0..=Board::MAX_MOVES {
             let board = make_board!("8/8/8/8/8/8/8/8 w - - 0 {i}");
             assert_eq!(board.irreversible_half, 0);
-            assert_eq!(board.plies, i * 2);
+            assert_eq!(board.plies + board.root_plies, i * 2);
             let board = make_board!("8/8/8/8/8/8/8/8 b - - 0 {i}");
             assert_eq!(board.irreversible_half, 0);
-            assert_eq!(board.plies, i * 2 + 1);
+            assert_eq!(board.plies + board.root_plies, i * 2 + 1);
         }
     }
 

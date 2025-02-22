@@ -69,7 +69,7 @@ fn cmd_position_moves(mut tokens: std::str::SplitWhitespace<'_>, mut board: Boar
             "moves" => {
                 for mv in tokens.by_ref() {
                     let mv = Move::from_uci_algebraic(mv).unwrap();
-                    board.push_history();
+                    board.commit_move();
                     let _ = mv.make(&mut board);
                     // we won't be going back in time, so these states are useless
                     board.discard_nnue();

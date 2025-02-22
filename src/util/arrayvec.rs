@@ -282,7 +282,9 @@ impl<const N: usize, T: Sized> Index<usize> for ArrayVec<N, T> {
     fn index(&self, index: usize) -> &Self::Output {
         assert!(
             (0..self.len).contains(&index),
-            "Out of range index of ArrayVec"
+            "out of range index of ArrayVec: {} (len {})",
+            index,
+            self.len,
         );
         // SAFETY: invariant 1 of `ArrayVec`, and above assert
         unsafe { self.data[index].assume_init_ref() }
@@ -293,7 +295,9 @@ impl<const N: usize, T: Sized> IndexMut<usize> for ArrayVec<N, T> {
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
         assert!(
             (0..self.len).contains(&index),
-            "Out of range index of ArrayVec"
+            "out of range mut index of ArrayVec: {} (len {})",
+            index,
+            self.len,
         );
         // SAFETY: invariant 1 of `ArrayVec`, and above assert
         unsafe { self.data[index].assume_init_mut() }

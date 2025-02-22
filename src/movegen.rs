@@ -173,6 +173,9 @@ impl AntiMove {
         if update_metrics {
             Zobrist::toggle_board_info(pos);
             pos.nnue.unmake();
+
+            // delete position before making move from history
+            pos.pop_history();
         }
     }
 }
@@ -221,8 +224,12 @@ impl Move {
         };
 
         if update_metrics {
+            // save position before making move
+            pos.push_history();
+
             // undo hashes (we will update them at the end of this function)
             Zobrist::toggle_board_info(pos);
+
             pos.nnue.start_delta();
         }
 

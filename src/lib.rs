@@ -31,6 +31,7 @@ pub mod prelude;
 use crate::fen::{FromFen, ToFen, START_POSITION};
 use crate::hash::Zobrist;
 use crate::movegen::GenAttackers;
+use crate::util::arrayvec::ArrayVec;
 use std::ops;
 
 pub const BOARD_WIDTH: usize = 8;
@@ -470,150 +471,18 @@ impl Display for CastleRights {
     }
 }
 
-/// Ring-buffer pointer that will never point outside the buffer.
-#[derive(PartialEq, Eq, Clone, Copy, Debug)]
-struct RingPtr<const N: usize>(usize);
-
-impl<const N: usize> From<RingPtr<N>> for usize {
-    fn from(value: RingPtr<N>) -> Self {
-        debug_assert!((0..N).contains(&value.0));
-        value.0
-    }
-}
-
-impl<const N: usize> std::ops::Add<usize> for RingPtr<N> {
-    type Output = Self;
-
-    fn add(self, rhs: usize) -> Self::Output {
-        Self((self.0 + rhs) % N)
-    }
-}
-
-impl<const N: usize> std::ops::Sub<usize> for RingPtr<N> {
-    type Output = Self;
-
-    fn sub(self, rhs: usize) -> Self::Output {
-        Self((self.0 + N - rhs) % N)
-    }
-}
-
-impl<const N: usize> std::ops::AddAssign<usize> for RingPtr<N> {
-    fn add_assign(&mut self, rhs: usize) {
-        self.0 = (self.0 + rhs) % N;
-    }
-}
-
-impl<const N: usize> std::ops::SubAssign<usize> for RingPtr<N> {
-    fn sub_assign(&mut self, rhs: usize) {
-        self.0 = (self.0 + N - rhs) % N;
-    }
-}
-
-impl<const N: usize> Default for RingPtr<N> {
-    fn default() -> Self {
-        Self(0)
-    }
-}
-
-impl<const N: usize> RingPtr<N> {}
-
-#[cfg(test)]
-mod ringptr_tests {
-    use super::*;
-
-    /// ring buffer pointer behaviour
-    #[test]
-    fn test_ringptr() {
-        let ptr_start: RingPtr<3> = RingPtr::default();
-
-        let ptr: RingPtr<3> = RingPtr::default() + 3;
-        assert_eq!(ptr, ptr_start);
-
-        let ptr2: RingPtr<3> = RingPtr::default() + 2;
-        assert_eq!(ptr2, ptr_start - 1);
-        assert_eq!(ptr2, ptr_start + 2);
-    }
-}
-
-/// Ring-buffer of previously seen hashes, used to avoid draw by repetition.
+/// Array of previously seen hashes, used to avoid draw by repetition.
 ///
-/// Only stores at most `HISTORY_SIZE` plies.
-#[derive(Clone, Copy, Debug)]
+/// Only stores at most [`HISTORY_SIZE`] plies.
+#[derive(Clone, Debug, Default)]
 struct BoardHistory {
-    hashes: [Zobrist; HISTORY_SIZE],
-    /// Index of the start of the history in the buffer
-    ptr_start: RingPtr<HISTORY_SIZE>,
-    /// Index one-past-the-end of the history in the buffer
-    ptr_end: RingPtr<HISTORY_SIZE>,
+    inner: ArrayVec<HISTORY_SIZE, Zobrist>,
 }
-
-impl Default for BoardHistory {
-    fn default() -> Self {
-        BoardHistory {
-            // rust can't derive this
-            hashes: [Zobrist::default(); HISTORY_SIZE],
-            ptr_start: Default::default(),
-            ptr_end: Default::default(),
-        }
-    }
-}
-
-impl PartialEq for BoardHistory {
-    /// Always equal, since comparing two boards with different histories shouldn't matter.
-    fn eq(&self, _other: &Self) -> bool {
-        true
-    }
-}
-
-impl Eq for BoardHistory {}
 
 /// Size in plies of the board history.
 ///
-/// Actual capacity is one less than this.
-const HISTORY_SIZE: usize = 100;
-
-impl BoardHistory {
-    /// Counts occurences of this hash in the history.
-    fn _count(&self, hash: Zobrist) -> usize {
-        let mut ans = 0;
-
-        let mut i = self.ptr_start;
-        while i != self.ptr_end {
-            if self.hashes[usize::from(i)] == hash {
-                ans += 1;
-            }
-            i += 1;
-        }
-
-        ans
-    }
-
-    /// Find if there are at least `n` matches for a hash in the last `recent` plies.
-    fn at_least_in_recent(&self, mut n: usize, recent: usize, hash: Zobrist) -> bool {
-        let mut i = self.ptr_end - recent;
-
-        while i != self.ptr_end && n > 0 {
-            if self.hashes[usize::from(i)] == hash {
-                n -= 1;
-            }
-            i += 1;
-        }
-
-        n == 0
-    }
-
-    /// Add (push) hash to history.
-    fn push(&mut self, hash: Zobrist) {
-        self.hashes[usize::from(self.ptr_end)] = hash;
-
-        self.ptr_end += 1;
-
-        // replace old entries
-        if self.ptr_end == self.ptr_start {
-            self.ptr_start += 1;
-        }
-    }
-}
+/// The game must not last longer than this.
+const HISTORY_SIZE: usize = 1024;
 
 /// Information to reverse a null-move.
 pub struct AntiNullMove {
@@ -653,7 +522,7 @@ impl BoardInformation {
 /// Game state, describes a position.
 ///
 /// Default is empty.
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
+#[derive(Debug, Default, Clone)]
 pub struct Board {
     /// Player bitboards
     players: [PlayerBoards; N_COLORS],
@@ -675,14 +544,29 @@ pub struct Board {
     /// Plies since last irreversible (capture, pawn) move
     irreversible_half: usize,
 
-    /// Half-moves in total in this game (one white move, then black move, is two half moves)
+    /// Half-moves played in total in this game (one white move, then black move, is two half moves).
+    ///
+    /// Beware this may not align with the move count reported in the FEN; this is an offset of
+    /// `root_plies`.
     plies: usize,
+
+    /// Number of plies that were actually played in game.
+    ///
+    /// This is in contrast to `plies`, which also includes plies that are being examined by the
+    /// engine, but haven't yet been played.
+    real_plies: usize,
+
+    /// Base number of plies.
+    ///
+    /// For example, if a ply count is specified in the FEN, it would be stored here.
+    /// `plies` will only reflect an offset based on this amount.
+    root_plies: usize,
 
     /// Whose turn it is
     turn: Color,
 
     /// Neural network state.
-    nnue: nnue::NnueHistory,
+    nnue: Box<nnue::NnueHistory>,
 
     /// Hash state to incrementally update.
     zobrist: Zobrist,
@@ -697,6 +581,21 @@ pub struct Board {
     info: BoardInformation,
 }
 
+impl PartialEq for Board {
+    fn eq(&self, other: &Self) -> bool {
+        self.players == other.players
+            && self.occupancy == other.occupancy
+            && self.mail == other.mail
+            && self.ep_square == other.ep_square
+            && self.castle == other.castle
+            && self.plies + self.root_plies == other.plies + other.root_plies
+            && self.turn == other.turn
+            && self.info == other.info
+    }
+}
+
+impl Eq for Board {}
+
 impl Board {
     /// Default chess position.
     pub fn starting_pos() -> Self {
@@ -704,8 +603,23 @@ impl Board {
     }
 
     /// Save the current position's hash in the history.
-    pub fn push_history(&mut self) {
-        self.history.push(self.zobrist);
+    fn push_history(&mut self) {
+        self.history
+            .inner
+            .try_push(self.zobrist)
+            .expect("game exceeded maximum ply count");
+    }
+
+    /// Delete the position's hash from the board history.
+    fn pop_history(&mut self) {
+        self.history.inner.pop();
+    }
+
+    /// Increase the `real_plies` counter.
+    ///
+    /// Call this after every move actually played.
+    pub fn commit_move(&mut self) {
+        self.real_plies += 1
     }
 
     /// Discard NNUE state.
@@ -713,10 +627,54 @@ impl Board {
         self.nnue.clear();
     }
 
-    /// Is this position a draw by three repetitions?
+    /// Do we assign a draw score to this position because of repetition?
+    ///
+    /// Beware this may return true for single repetitions (i.e. seeing a position twice),
+    /// so it is not checking for three-fold repetition specifically.
+    ///
+    /// Generally, the strategy is that:
+    ///
+    /// * Three-fold repetition (i.e. position repeated twice) is an automatic draw.
+    /// * Repeating once is a draw if the position being repeated exists in the search (i.e. hasn't
+    ///   been actually played in the game yet). This avoids re-searching a position uselessly.
+    /// * Otherwise (i.e. the repeated position actually happened in game), single repetition is
+    ///   not considered a draw.
     pub fn is_repetition(&mut self) -> bool {
-        self.history
-            .at_least_in_recent(2, self.irreversible_half, self.zobrist)
+        let mut i = self.plies;
+        let mut counted = 0;
+        let mut repetitions = 0;
+        debug_assert_eq!(
+            self.history.inner.len(),
+            self.plies,
+            "history size does not match reported ply count"
+        );
+
+        while counted < self.irreversible_half && i > 0 {
+            // subtract first, because we want to examine past positions
+            i -= 1;
+
+            debug_assert!(
+                self.history.inner.len() > i,
+                "out of range ({}/{}) access on board history {}",
+                i,
+                self.history.inner.len(),
+                self.to_fen()
+            );
+
+            if self.history.inner[i] == self.zobrist {
+                repetitions += 1;
+            }
+            if i > self.real_plies {
+                if repetitions > 0 {
+                    return true;
+                }
+            } else if repetitions > 1 {
+                return true;
+            }
+            counted += 1;
+        }
+
+        false
     }
 
     /// Get iterator over all squares.
@@ -748,6 +706,8 @@ impl Board {
     ///
     /// Equivalent to flipping the board's turn.
     pub fn make_null_move(&mut self) -> AntiNullMove {
+        self.push_history();
+
         self.zobrist.toggle_turn(self.turn);
         self.turn = self.turn.flip();
         self.zobrist.toggle_turn(self.turn);
@@ -768,6 +728,8 @@ impl Board {
         self.zobrist.toggle_turn(self.turn);
         self.ep_square = anti_mv.ep_square;
         self.zobrist.toggle_ep(self.ep_square);
+
+        self.pop_history()
     }
 
     /// Create a new piece in a location, and pop any existing piece in the destination.
@@ -850,6 +812,7 @@ impl Board {
             turn: self.turn.flip(),
             irreversible_half: self.irreversible_half,
             plies: self.plies ^ 1,
+            root_plies: self.root_plies,
             ep_square: self.ep_square.map(|sq| sq.mirror_vert()),
             castle: CastleRights(self.castle.0),
             zobrist: Zobrist::default(),
@@ -1081,7 +1044,14 @@ mod tests {
         for (tc, expect) in test_cases {
             let tc = Board::from_fen(tc).unwrap();
             let expect = Board::from_fen(expect).unwrap();
-            assert_eq!(tc.flip_colors(), expect);
+            let flipped = tc.flip_colors();
+            assert_eq!(
+                flipped,
+                expect,
+                "failed flip color: got {} instead of {}",
+                flipped.to_fen(),
+                expect.to_fen()
+            );
         }
     }
 
@@ -1108,41 +1078,6 @@ mod tests {
     }
 
     #[test]
-    fn test_history() {
-        let board = Board::starting_pos();
-
-        let mut history = BoardHistory::default();
-        for _ in 0..(HISTORY_SIZE + 15) {
-            history.push(board.zobrist);
-        }
-
-        assert_eq!(history._count(board.zobrist), HISTORY_SIZE - 1);
-        assert!(history.at_least_in_recent(1, 1, board.zobrist));
-        assert!(history.at_least_in_recent(2, 3, board.zobrist));
-        assert!(history.at_least_in_recent(1, 3, board.zobrist));
-
-        let board_empty = Board::default();
-        history.push(board_empty.zobrist);
-
-        assert!(!history.at_least_in_recent(1, 1, board.zobrist));
-        assert!(history.at_least_in_recent(1, 2, board.zobrist));
-
-        assert_eq!(history._count(board.zobrist), HISTORY_SIZE - 2);
-        assert_eq!(history._count(board_empty.zobrist), 1);
-        assert!(history.at_least_in_recent(1, 3, board.zobrist));
-        assert!(history.at_least_in_recent(1, 20, board_empty.zobrist));
-        assert!(history.at_least_in_recent(1, 15, board_empty.zobrist));
-        assert!(history.at_least_in_recent(1, 1, board_empty.zobrist));
-
-        for _ in 0..3 {
-            history.push(board_empty.zobrist);
-        }
-
-        assert_eq!(history._count(board_empty.zobrist), 4);
-        assert_eq!(history._count(board.zobrist), HISTORY_SIZE - 5);
-    }
-
-    #[test]
     fn repetition_detection() {
         let mut board = Board::starting_pos();
 
@@ -1152,16 +1087,23 @@ mod tests {
             .map(|x| x.unwrap())
             .collect::<Vec<_>>();
 
+        let mut count = 0;
+
+        assert_eq!(board.history.inner.len(), 0);
         for _ in 0..2 {
             for mv in &mvs {
-                board.push_history();
                 let _ = mv.make(&mut board);
+                count += 1;
+                eprintln!("after {count} mvs, {} plies", board.plies);
+                assert_eq!(board.history.inner.len(), count);
             }
         }
 
-        // this is the third occurence, but beforehand there are two occurences
-        assert_eq!(board.history._count(board.zobrist), 2);
-        assert!(board.is_repetition(), "fen: {}", board.to_fen());
+        assert!(
+            board.is_repetition(),
+            "failed to detect repetition on fen: {}",
+            board.to_fen()
+        );
     }
 
     /// engine should take advantage of the three time repetition rule
@@ -1182,9 +1124,10 @@ mod tests {
         let mut cnt = 0;
 
         for mv in &mvs {
-            board.push_history();
             cnt += 1;
             let _ = mv.make(&mut board);
+            eprintln!("after {cnt} mvs, {} plies", board.plies);
+            assert_eq!(board.history.inner.len(), cnt);
         }
 
         eprintln!("board is: '{}'", board.to_fen());
@@ -1210,10 +1153,6 @@ mod tests {
         let best_mv = line.last().unwrap();
 
         expected_bestmv.make(&mut board);
-        eprintln!(
-            "after expected mv, board repeated {} times",
-            board.history._count(board.zobrist)
-        );
 
         assert_eq!(
             *best_mv,
