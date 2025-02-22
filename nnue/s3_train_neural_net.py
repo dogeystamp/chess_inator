@@ -77,7 +77,7 @@ EPOCHS = 50
 
 # neural net architecture
 
-HIDDEN_SIZE = 320
+HIDDEN_SIZE = 512
 """Hidden layer size."""
 
 INPUT_SIZE = 2 * 6 * 64  # 768
@@ -419,53 +419,6 @@ def tune_sigmoid(cp, wdl) -> np.double:
 ################################
 
 
-class EarlyStop:
-    """
-    Module to halt training when there is no longer any improvement.
-
-    Arguments
-    ---------
-    patience: how many epochs without improvement to tolerate before stopping
-    """
-
-    def __init__(self, patience: int = 3):
-        self.patience = patience
-        self.bad_epochs = 0
-        self.best_model_state = None
-        self.best_loss = None
-
-    def step(self, test_loss, model) -> None:
-        """Given a model and its validation loss, update the early stopping state."""
-        if not self.best_loss or self.best_loss > test_loss:
-            self.best_model_state = model.state_dict()
-            self.best_loss = test_loss
-            self.bad_epochs = 0
-            logging.info("Model performance is current best.")
-        else:
-            self.bad_epochs += 1
-
-    def is_early_stop(self) -> bool:
-        """If true, halt the training."""
-        return self.bad_epochs > self.patience
-
-    def load_best_model(self, model):
-        model.load_state_dict(self.best_model_state)
-
-    def state_dict(self):
-        return dict(
-            patience=self.patience,
-            bad_epochs=self.bad_epochs,
-            best_model_state=self.best_model_state,
-            best_loss=float(self.best_loss) if self.best_loss else None,
-        )
-
-    def load_state_dict(self, state):
-        self.patience = state["patience"]
-        self.bad_epochs = state["bad_epochs"]
-        self.best_model_state = state["best_model"]
-        self.best_loss = np.double(state["best_loss"]) 
-
-
 class CReLU(nn.Module):
     """Clamped ReLU."""
 
@@ -477,17 +430,17 @@ class CReLU(nn.Module):
 
 
 class NNUE(nn.Module):
-    def __init__(self) -> None:
+    def __init__(self, l1_size=HIDDEN_SIZE) -> None:
         super().__init__()
         self.k: np.double | None = None
         self.arch = ARCHITECTURE
         self.arch_specific = ARCHITECTURE_SPECIFIC
-        self.l1_size = HIDDEN_SIZE
+        self.l1_size = l1_size
 
         with torch.no_grad():
             # initialize model to a simple piece value evaluation
-            l1 = nn.Linear(INPUT_SIZE, HIDDEN_SIZE, dtype=torch.double, device=device)
-            out = nn.Linear(HIDDEN_SIZE, 1, dtype=torch.double, device=device)
+            l1 = nn.Linear(INPUT_SIZE, self.l1_size, dtype=torch.double, device=device)
+            out = nn.Linear(self.l1_size, 1, dtype=torch.double, device=device)
 
             l1_params = list(l1.parameters())
             out_params = list(out.parameters())
@@ -548,6 +501,53 @@ class NNUE(nn.Module):
 ## neural net training
 ################################
 ################################
+
+
+class EarlyStop:
+    """
+    Module to halt training when there is no longer any improvement.
+
+    Arguments
+    ---------
+    patience: how many epochs without improvement to tolerate before stopping
+    """
+
+    def __init__(self, patience: int = 3):
+        self.patience = patience
+        self.bad_epochs = 0
+        self.best_model_state = None
+        self.best_loss = None
+
+    def step(self, test_loss, model) -> None:
+        """Given a model and its validation loss, update the early stopping state."""
+        if not self.best_loss or self.best_loss > test_loss:
+            self.best_model_state = model.state_dict()
+            self.best_loss = test_loss
+            self.bad_epochs = 0
+            logging.info("Model performance is current best.")
+        else:
+            self.bad_epochs += 1
+
+    def is_early_stop(self) -> bool:
+        """If true, halt the training."""
+        return self.bad_epochs > self.patience
+
+    def load_best_model(self, model):
+        model.load_state_dict(self.best_model_state)
+
+    def state_dict(self):
+        return dict(
+            patience=self.patience,
+            bad_epochs=self.bad_epochs,
+            best_model_state=self.best_model_state,
+            best_loss=float(self.best_loss) if self.best_loss else None,
+        )
+
+    def load_state_dict(self, state):
+        self.patience = state["patience"]
+        self.bad_epochs = state["bad_epochs"]
+        self.best_model_state = state["best_model"]
+        self.best_loss = np.double(state["best_loss"])
 
 
 def train_loop(dataloader, model, loss_fn, optimizer) -> np.double:
@@ -691,7 +691,6 @@ def train(
         logging.info("Initial TEST loss is: %s", test_loss)
         early_stopper.step(test_loss, model)
 
-
     big_batch_loader = BigBatchLoader(args.datafile, big_epoch_start)
     for big_batch_idx, big_batch in big_batch_loader.big_batches():
         logging.info("Loaded big batch dataset (%d rows).", len(big_batch))
@@ -702,7 +701,9 @@ def train(
             train_dataset = big_batch
             test_dataset = separate_test_dataset
         else:
-            logging.warning("Using random split for test/train data; prefer a separate test dataset (--test-dataset) instead.")
+            logging.warning(
+                "Using random split for test/train data; prefer a separate test dataset (--test-dataset) instead."
+            )
             train_dataset, test_dataset = torch.utils.data.random_split(
                 big_batch, [0.97, 0.03], generator=generator
             )
@@ -737,7 +738,7 @@ def train(
             if save_path:
                 save_model(
                     save_path,
-                    model.state_dict(),
+                    model,
                     optimizer,
                     scheduler,
                     total_epoch,
@@ -808,6 +809,7 @@ def load_model(
     scheduler: torch.optim.lr_scheduler.LRScheduler | None = None,
     early_stop: EarlyStop | None = None,
     load_best: bool = True,
+    force_load: bool = False,
 ) -> int | None:
     """
     Load a model checkpoint.
@@ -820,7 +822,7 @@ def load_model(
     checkpoint = torch.load(load_path, weights_only=True, map_location=device)
     if arch := checkpoint.get("arch"):
         if arch != model.arch:
-            if "args" in globals() and args.force_load:
+            if force_load or "args" in globals() and args.force_load:
                 logging.warning(
                     "Force-loading arch '%s', but was expecting '%s'.", arch, model.arch
                 )
@@ -830,7 +832,7 @@ def load_model(
                 )
     if arch_s := checkpoint.get("arch_specific"):
         if arch_s != model.arch_specific:
-            if "args" in globals() and args.force_load:
+            if force_load or "args" in globals() and args.force_load:
                 logging.warning(
                     "Force-loading specific arch '%s', but was expecting '%s'.",
                     arch_s,
@@ -868,7 +870,7 @@ def load_model(
 
 def save_model(
     save_path: Path,
-    model_state,
+    model,
     optimizer: torch.optim.Optimizer | None = None,
     scheduler: torch.optim.lr_scheduler.LRScheduler | None = None,
     epoch: int | None = None,
@@ -881,18 +883,42 @@ def save_model(
 
     torch.save(
         dict(
-            model_state_dict=model_state,
+            model_state_dict=model.state_dict(),
             scheduler_state_dict=scheduler_state,
             optimizer_state_dict=optim_state,
             epoch=epoch,
             k=torch.as_tensor(model.k),
             arch=model.arch,
             arch_specific=model.arch_specific,
-            l1_size=HIDDEN_SIZE,
+            l1_size=model.l1_size,
             early_stop=early_stop.state_dict() if early_stop else None,
         ),
         save_path,
     )
+
+
+def transmogrify_model(small_model: NNUE, new_model: NNUE):
+    """
+    Upgrade a trained model to a bigger hidden layer size.
+
+    This is intended to be called from a REPL, as this is not a common
+    operation. Update `HIDDEN_SIZE` to the new size, then force-load the old
+    model, overriding `l1_size` to the old size.
+    """
+    p1 = list(small_model.parameters())
+    p2 = list(new_model.parameters())
+
+    # weights
+    for pi in (0, 2):
+        for i in range(len(p1[pi])):
+            for j in range(len(p1[pi][i])):
+                p2[pi].data[i][j] = p1[pi].data[i][j]
+    # biases
+    for pi in (1, 3):
+        for i in range(len(p1[pi])):
+            p2[pi].data[i] = p1[pi].data[i]
+
+    new_model.k = small_model.k
 
 
 ################################

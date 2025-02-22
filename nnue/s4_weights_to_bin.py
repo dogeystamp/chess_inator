@@ -71,6 +71,12 @@ parser.add_argument(
     type=Path,
     help="Output path for .bin format weights.",
 )
+parser.add_argument(
+    "-f",
+    "--force",
+    action="store_true",
+    help="Force-load the model, despite incompatible version.",
+)
 
 ################################
 ################################
@@ -103,7 +109,7 @@ if __name__ == "__main__":
 
     with torch.no_grad():
         model = s3nn.NNUE()
-        s3nn.load_model(args.pth, model, load_best=True)
+        s3nn.load_model(args.pth, model, load_best=True, force_load=True)
 
         arch: str = model.arch
 
