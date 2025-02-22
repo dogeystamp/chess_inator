@@ -207,9 +207,9 @@ positions for training.
 <td>
 
 ```
-nnue4-320 (fb66aa8) vs c_i pvs12-5 (06d195b)
+vs c_i pvs12-5 (06d195b)
 nElo: 56.67 +/- 25.56
-Games: 710, Wins: 371, Losses: 260, Draws: 79
+Wins: 371, Losses: 260, Draws: 79
 ```
 
 </td>
@@ -231,9 +231,9 @@ Fine-tuned gen 4 on 3 million self-play positions.
 <td>
 
 ```
-c_i nnue05a-320 (560a7c6) vs c_i hash-non-two (2c4a38f)
+vs c_i hash-non-two (2c4a38f)
 nElo: 34.67 +/- 19.56
-Games: 1212, Wins: 574, Losses: 463, Draws: 175
+Wins: 574, Losses: 463, Draws: 175
 ```
 
 </td>
@@ -255,9 +255,37 @@ Fine-tuned gen 5 on 2 million self-play positions.
 <td>
 
 ```
-c_i nnue06a-320 (69b196d) vs c_i check-handling3 (ef178a3)
+vs c_i check-handling3 (ef178a3)
 nElo: 32.75 +/- 18.97
-Games: 1288, Wins: 596, Losses: 486, Draws: 206
+Wins: 596, Losses: 486, Draws: 206
+```
+
+</td>
+</tr>
+
+
+<tr>
+<td>Generation 7b</td>
+<td>
+
+`nnue7b-512`
+
+</td>
+<td>
+
+Network hidden layer increased from 320 to 512 neurons; gen 6's trained weights
+were transferred to the new net. Trained on almost 5 million self-play positions.
+
+Training seemed to stall and always overfit without the hidden layer size increase,
+which is why 7a was discarded.
+
+</td>
+<td>
+
+```
+vs c_i avoid-rep-new (16aebf8)
+nElo: 51.63 +/- 24.45
+Wins: 371, Losses: 269, Draws: 136
 ```
 
 </td>
