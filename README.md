@@ -220,7 +220,7 @@ Wins: 371, Losses: 260, Draws: 79
 <td>Generation 5</td>
 <td>
 
-`nnue5a-320`
+`nnue05a-320`
 
 </td>
 <td>
@@ -244,7 +244,7 @@ Wins: 574, Losses: 463, Draws: 175
 <td>Generation 6</td>
 <td>
 
-`nnue6a-320`
+`nnue06a-320`
 
 </td>
 <td>
@@ -268,7 +268,7 @@ Wins: 596, Losses: 486, Draws: 206
 <td>Generation 7b</td>
 <td>
 
-`nnue7b-512`
+`nnue07b-512`
 
 </td>
 <td>
