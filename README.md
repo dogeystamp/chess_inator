@@ -2,9 +2,10 @@
 
 A chess engine built from scratch, powered by a neural network.
 
-This engine is trained on master level games from Lichess. Notably,
-chess-inator does not use analysis from existing engines like Stockfish; it
-learns entirely on its own, scoring positions with prior versions of itself.
+This engine is trained on games played with prior versions of itself, and
+master level games from Lichess. Notably, chess-inator does not learn using
+analysis from existing engines like Stockfish; it learns entirely on its own,
+scoring positions with prior versions of itself.
 
 The engine is trained with little pre-existing knowledge of chess.
 Specifically, chess-inator started off knowing:
@@ -23,21 +24,26 @@ described in the "development instructions" section.
 
 These are some technical details about the features implemented in the engine.
 
+- NNUE evaluation
 - Mailbox and redundant bitboard representation
-    - Naive pseudo-legal move generation
+    - Simple pseudo-legal move generation
 - Make/unmake
 - Negamax search
     - Alpha-beta pruning
     - Principal Variation Search (PVS)
     - Killer move heuristic
-- NNUE evaluation
-- UCI compatibility
+    - Null-move pruning
+    - Late move reductions
+    - Quiescence search
+    - Check extension
 - Iterative deepening
     - Time management (soft, hard limit)
-- Transposition table (Zobrist hashing)
-    - Age/depth replacement scheme
-- Quiescence search
-- Check extension
+- Transposition table (Zobrist hashed)
+    - Best move
+    - Evaluation
+    - Static evaluation
+    - Depth
+- UCI compatibility
 
 At runtime, chess-inator has zero dependencies other than the Rust standard library.
 
