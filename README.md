@@ -299,6 +299,34 @@ Wins: 371, Losses: 269, Draws: 136
 
 
 <tr>
+<td>Generation 7c</td>
+<td>
+
+`nnue07c-512`
+
+</td>
+<td>
+
+Identical to gen 7b (i.e. trained on the same data starting from the same gen 6
+net), but trained with vertical mirroring as a data augmentation strategy.
+
+Discarded in favour of 7d (vertical mirroring isn't as useful since perspective
+nets are very common.)
+
+</td>
+<td>
+
+```
+vs c_i nnue07d-512 (a26a5d7)
+nElo: -39.38 +/- 27.04
+Wins: 226, Losses: 288, Draws: 120
+```
+
+</td>
+</tr>
+
+
+<tr>
 <td>Generation 7d</td>
 <td>
 
@@ -307,8 +335,8 @@ Wins: 371, Losses: 269, Draws: 136
 </td>
 <td>
 
-Identical to gen 7b (i.e. trained on the same data starting from the same gen 6
-net), but trained with horizontal mirroring as a data augmentation strategy.
+Another sibling of 7b, but trained with horizontal mirroring as a data
+augmentation strategy.
 
 </td>
 <td>
