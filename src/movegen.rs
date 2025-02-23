@@ -92,6 +92,8 @@ enum AntiMoveType {
 pub struct AntiMove {
     dest: Square,
     src: Square,
+    /// recap_sq before the move.
+    recap_sq: Option<Square>,
     /// Captured piece, always assumed to be of enemy color.
     pub(crate) cap: Option<Piece>,
     move_type: AntiMoveType,
@@ -124,6 +126,7 @@ impl AntiMove {
         pos.irreversible_half = self.half_moves;
         pos.castle = self.castle;
         pos.ep_square = self.ep_square;
+        pos.recap_sq = self.recap_sq;
 
         /// Restore captured piece at a given square.
         macro_rules! cap_sq {
@@ -221,6 +224,7 @@ impl Move {
             half_moves: pos.irreversible_half,
             castle: pos.castle,
             ep_square: pos.ep_square,
+            recap_sq: pos.recap_sq,
         };
 
         if update_metrics {
@@ -410,6 +414,10 @@ impl Move {
                 pos.move_piece(self.src, self.dest, update_metrics);
             }
         };
+
+        if anti_move.cap.is_some() {
+            pos.recap_sq = Some(self.dest);
+        }
 
         pos.turn = pos.turn.flip();
 

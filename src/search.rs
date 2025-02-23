@@ -184,17 +184,30 @@ fn move_priority(
     let src_pc = board.get_piece(mv.src).unwrap();
     let anti_mv = mv.make(board);
 
+    let mut is_mate_score = false;
+
     if state.config.enable_trans_table {
         if let Some(entry) = &state.cache[board.zobrist] {
             eval = entry.eval.into();
+            if let Score::Checkmate(_) = entry.eval {
+                is_mate_score = true;
+            }
         }
     }
 
-    if state.killer_table.probe(mv, mm.plies) {
-        eval += 8000;
-    } else if let Some(cap_pc) = anti_mv.cap {
-        // least valuable victim, most valuable attacker
-        eval += lvv_mva_eval(src_pc.into(), cap_pc)
+    if !is_mate_score {
+        if state.killer_table.probe(mv, mm.plies) {
+            eval = eval.saturating_add(8000);
+        } else if let Some(cap_pc) = anti_mv.cap {
+            // least valuable victim, most valuable attacker
+            eval = eval.saturating_add(lvv_mva_eval(src_pc.into(), cap_pc));
+
+            if let Some(recap_sq) = board.recap_sq {
+                if recap_sq == mv.dest {
+                    eval = eval.saturating_add(801);
+                }
+            }
+        }
     }
 
     anti_mv.unmake(board);
