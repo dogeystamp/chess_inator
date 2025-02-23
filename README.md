@@ -296,5 +296,30 @@ Wins: 371, Losses: 269, Draws: 136
 
 </td>
 </tr>
+
+
+<tr>
+<td>Generation 7d</td>
+<td>
+
+`nnue07d-512`
+
+</td>
+<td>
+
+Identical to gen 7b (i.e. trained on the same data starting from the same gen 6
+net), but trained with horizontal mirroring as a data augmentation strategy.
+
+</td>
+<td>
+
+```
+vs c_i nnue07b-512 (e10a0c8)
+nElo: 40.44 +/- 21.38
+Wins: 475, Losses: 373, Draws: 166
+```
+
+</td>
+</tr>
     </tbody>
 </table>
