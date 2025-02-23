@@ -817,8 +817,6 @@ def train(
 
         epoch_start = 0
 
-    early_stopper.load_best_model(model)
-
 
 def visualize_train_log(log_path: Path = Path("log_training.csv")):
     """Visualize the training loss log."""
