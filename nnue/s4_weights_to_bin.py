@@ -77,6 +77,11 @@ parser.add_argument(
     action="store_true",
     help="Force-load the model, despite incompatible version.",
 )
+parser.add_argument(
+    "--last",
+    action="store_true",
+    help="Load the last trained model checkpoint, rather than the best one (stored by the early stopper).",
+)
 
 ################################
 ################################

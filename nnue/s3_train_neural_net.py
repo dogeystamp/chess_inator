@@ -56,21 +56,25 @@ LAMBDA = 0.92
 """
 (Default) interpolation coefficient between expected win probability, and real win probability.
 
-To set this, use the `--lambda` command-line flag.
+To override this, use the `--lambda` command-line flag.
 
 0 discards the engine label completely, and 1 discards the real game result
-completely. Using a naive material-counting engine in the analysis, this default
-value should work. For a smarter engine, use a higher value, like 0.97, so that
-it can go through reinforcement learning based on its existing knowledge.
+completely.
 """
 
-LEARN_RATE = 1e-6
+LEARN_RATE = 1e-4
+"""
+Gradient descent learn rate.
+
+This is the initial rate; an LR scheduler will gradually change this as training continues.
+"""
+
 WEIGHT_DECAY = 0.01
 BATCH_SIZE = 8192
 # this test batch size is the best performance on hardware.
 # but for training, we might want lower batch sizes to avoid overfitting
-TEST_BATCH_SIZE = 16384
-BIG_BATCH_SIZE = 2**22
+TEST_BATCH_SIZE = 8192
+BIG_BATCH_SIZE = int(6e6)
 
 # early stopping may cut training off before this
 EPOCHS = 50
@@ -254,16 +258,18 @@ class ChessPositionDataset(Dataset):
 
         CHUNK_SIZE = 65536
 
+        nrows = min(BIG_BATCH_SIZE, self.limit_rows or BIG_BATCH_SIZE)
+
         for chunk in tqdm(
             pd.read_csv(
                 self.data_file,
                 delimiter="\t",
                 chunksize=CHUNK_SIZE,
                 skiprows=self.cur_big_batch * BIG_BATCH_SIZE,
-                nrows=min(BIG_BATCH_SIZE, self.limit_rows or BIG_BATCH_SIZE),
+                nrows=nrows,
             ),
             desc="READ BIG BATCH",
-            total=math.ceil(BIG_BATCH_SIZE / CHUNK_SIZE),
+            total=math.ceil(nrows / CHUNK_SIZE),
             unit="chunk",
             postfix=dict(chk_sz=CHUNK_SIZE),
         ):
@@ -372,6 +378,52 @@ class ChessPositionDataset(Dataset):
         plt.ylabel("Win-Draw-Loss evaluation")
 
         plt.show()
+
+
+def color_flip_feature(idx):
+    idx = idx.to(dtype=torch.int32)
+
+    N_SQUARES = 64
+    N_PIECES = 6
+    square_idx = idx % N_SQUARES
+    pc_idx = (idx - square_idx) % (N_PIECES * N_SQUARES) // N_SQUARES
+    col_idx = (idx - square_idx - pc_idx * N_SQUARES) // (N_PIECES * N_SQUARES)
+
+    # swap color
+    col_idx ^= 1
+    # vertical flip the squares
+    square_idx ^= 0b111000
+
+    return col_idx * N_SQUARES * N_PIECES + pc_idx * N_SQUARES + square_idx
+
+
+def horiz_flip_feature(idx):
+    idx ^= 0b111
+
+    return idx
+
+
+class AugmentedChessDataset(Dataset):
+    """Shim over the data that does color inversion data augmentation."""
+
+    def __init__(self, orig: ChessPositionDataset):
+        self.data = orig
+        self.k = orig.k
+
+    def __len__(self):
+        return len(self.data) * 2
+
+    def __getitem__(self, idx):
+        if idx < len(self.data):
+            return self.data[idx]
+        row = self.data.data.iloc[idx - len(self.data)]
+        new_features = horiz_flip_feature(row["board_features"].detach().clone())
+        return (
+            convert_sparse(new_features),
+            torch.tensor(
+                row["expected_result"], dtype=torch.double, device=device
+            ).unsqueeze(-1),
+        )
 
 
 ################################
@@ -512,7 +564,7 @@ class EarlyStop:
     patience: how many epochs without improvement to tolerate before stopping
     """
 
-    def __init__(self, patience: int = 3):
+    def __init__(self, patience: int = 4):
         self.patience = patience
         self.bad_epochs = 0
         self.best_model_state = None
@@ -546,7 +598,7 @@ class EarlyStop:
     def load_state_dict(self, state):
         self.patience = state["patience"]
         self.bad_epochs = state["bad_epochs"]
-        self.best_model_state = state["best_model"]
+        self.best_model_state = state["best_model_state"]
         self.best_loss = np.double(state["best_loss"])
 
 
@@ -628,10 +680,10 @@ class BigBatchLoader:
         self.data_file = data_file
         self.start = start
 
-    def big_batches(self) -> Iterable[tuple[int, ChessPositionDataset]]:
+    def big_batches(self) -> Iterable[tuple[int, AugmentedChessDataset]]:
         try:
             for i in range(self.total_big_batches):
-                yield i, ChessPositionDataset(self.data_file, i)
+                yield i, AugmentedChessDataset(ChessPositionDataset(self.data_file, i))
         except pd.errors.EmptyDataError:
             pass
 
@@ -657,14 +709,14 @@ def train(
         model.parameters(), lr=LEARN_RATE, weight_decay=WEIGHT_DECAY
     )
     scheduler = torch.optim.lr_scheduler.LinearLR(
-        optimizer, start_factor=1.0, end_factor=1.0, total_iters=8
+        optimizer, start_factor=1.0, end_factor=0.075, total_iters=12
     )
 
     big_epoch_start, epoch_start = 0, 0
 
     if load_path and load_path.is_file():
         logging.info("Loading saved model from '%s'...", load_path)
-        saved_epoch = load_model(load_path, model, optimizer, scheduler)
+        saved_epoch = load_model(load_path, model, optimizer, scheduler, load_best=False)
         if saved_epoch is not None:
             last_big_epoch, last_epoch = divmod(saved_epoch, EPOCHS)
             big_epoch_start, epoch_start = divmod(saved_epoch + 1, EPOCHS)
@@ -684,7 +736,7 @@ def train(
         test_dataloader = DataLoader(
             separate_test_dataset,
             num_workers=NUM_WORKERS,
-            batch_size=BATCH_SIZE,
+            batch_size=TEST_BATCH_SIZE,
             shuffle=False,
         )
         test_loss = test_loop(test_dataloader, model, loss_fn)
@@ -717,7 +769,7 @@ def train(
         test_dataloader = DataLoader(
             test_dataset,
             num_workers=NUM_WORKERS,
-            batch_size=BATCH_SIZE,
+            batch_size=TEST_BATCH_SIZE,
             shuffle=False,
         )
 
