@@ -294,6 +294,11 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Optio
     let is_repetition_draw = board.is_repetition();
     let is_in_check = board.is_check(board.turn);
 
+    // default to worst, then gradually improve
+    let mut alpha = mm.alpha.unwrap_or(EVAL_WORST);
+    // our best is their worst
+    let beta = mm.beta.unwrap_or(EVAL_BEST);
+
     #[derive(Debug)]
     enum MoveGenerator {
         /// Use heavily pruned search to generate moves leading to a quiet position.
@@ -327,6 +332,13 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Optio
                     // bypasses the draw by repetition checks in `minmax`. so just don't generate
                     // any other moves than the best move.
                     move_generator = MoveGenerator::None;
+                }
+
+                if let Score::Lower(eval) = entry.eval {
+                    if eval > beta && mm.beta.is_some() {
+                        // cutoff
+                        return (None, entry.eval)
+                    }
                 }
             }
         }
@@ -389,11 +401,6 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Optio
 
     // true in a pv node, until we find a move that raises alpha. then, it becomes false.
     let mut is_next_pv = is_pv;
-
-    // default to worst, then gradually improve
-    let mut alpha = mm.alpha.unwrap_or(EVAL_WORST);
-    // our best is their worst
-    let beta = mm.beta.unwrap_or(EVAL_BEST);
 
     // R parameter
     const NULL_MOVE_REDUCTION: usize = 2 * ONE_PLY;
