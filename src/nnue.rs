@@ -220,12 +220,12 @@ impl Nnue {
 
     /// Logits from neural net, which should correspond to centipawns.
     pub fn output(&self) -> EvalInt {
-        let mut out: [EvalInt; OUT_SIZE] = [0; OUT_SIZE];
+        let mut out: [i32; OUT_SIZE] = [0; OUT_SIZE];
 
         for (k, out_node) in out.iter_mut().enumerate() {
-            *out_node = EvalInt::from(WEIGHTS.out_b[k]);
+            *out_node = i32::from(WEIGHTS.out_b[k]);
             for j in 0..L1_SIZE {
-                *out_node += EvalInt::from(WEIGHTS.out_w[k][j]) * EvalInt::from(crelu(self.l1[j]));
+                *out_node += i32::from(WEIGHTS.out_w[k][j]) * i32::from(crelu(self.l1[j]));
             }
         }
 
@@ -235,7 +235,7 @@ impl Nnue {
         // dequantization step
         out[0] /= DEQUANTIZE_SCALE;
 
-        out[0]
+        out[0].clamp(EvalInt::MIN as i32, EvalInt::MAX as i32) as EvalInt
     }
 
     pub fn new() -> Self {

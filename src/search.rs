@@ -691,6 +691,11 @@ pub struct TranspositionEntry {
     static_eval: Option<EvalInt>,
 }
 
+/// Helper to accurately determine the size of the transposition table entries in the hash table.
+struct _HashRecord (
+    crate::hash::Zobrist, TranspositionEntry
+);
+
 impl crate::hash::TableReplacement for TranspositionEntry {
     fn replaces(&self, _other: &Self) -> bool {
         // always-replace strategy

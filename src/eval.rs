@@ -19,7 +19,7 @@ use core::cmp::max;
 /// Signed centipawn type.
 ///
 /// Positive is good for White, negative good for Black.
-pub type EvalInt = i32;
+pub type EvalInt = i16;
 
 pub trait Eval {
     /// Evaluate a position and assign it a score.
