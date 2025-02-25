@@ -4,3 +4,9 @@ train_data/
 __pycache__/
 weights.pth
 log_training.csv
+logs/
+raw_pgn/
+test_data/
+train_combi/
+unfiltered/
+weights/
