@@ -188,7 +188,7 @@ fn move_priority(
 
     if state.config.enable_trans_table {
         if let Some(entry) = &state.cache[board.zobrist] {
-            eval = entry.eval.into();
+            eval = EvalInt::from(entry.eval) / 100;
             if let Score::Checkmate(_) = entry.eval {
                 is_mate_score = true;
             }
@@ -197,14 +197,14 @@ fn move_priority(
 
     if !is_mate_score {
         if state.killer_table.probe(mv, mm.plies) {
-            eval = eval.saturating_add(8000);
+            eval = eval.saturating_add(80);
         } else if let Some(cap_pc) = anti_mv.cap {
             // least valuable victim, most valuable attacker
-            eval = eval.saturating_add(lvv_mva_eval(src_pc.into(), cap_pc));
+            eval = eval.saturating_add(lvv_mva_eval(src_pc.into(), cap_pc) / 100);
 
             if let Some(recap_sq) = board.recap_sq {
                 if recap_sq == mv.dest {
-                    eval = eval.saturating_add(801);
+                    eval = eval.saturating_add(9);
                 }
             }
         }
