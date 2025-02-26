@@ -197,14 +197,14 @@ fn move_priority(
 
     if !is_mate_score {
         if state.killer_table.probe(mv, mm.plies) {
-            eval = eval.saturating_add(80);
+            eval = eval.saturating_add(800);
         } else if let Some(cap_pc) = anti_mv.cap {
             // least valuable victim, most valuable attacker
-            eval = eval.saturating_add(lvv_mva_eval(src_pc.into(), cap_pc) / 100);
+            eval = eval.saturating_add(lvv_mva_eval(src_pc.into(), cap_pc) / 10);
 
             if let Some(recap_sq) = board.recap_sq {
                 if recap_sq == mv.dest {
-                    eval = eval.saturating_add(9);
+                    eval = eval.saturating_add(90);
                 }
             }
         }
