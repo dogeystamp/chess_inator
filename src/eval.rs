@@ -47,10 +47,10 @@ pub trait EvalSEE {
 
 impl Eval for Board {
     fn eval(&mut self) -> EvalInt {
-        let mut eval = 0;
+        let mut eval: EvalInt = 0;
 
         let nnue_eval = self.nnue.output();
-        eval += nnue_eval;
+        eval = eval.saturating_add(nnue_eval);
 
         // our nnue is kind of not smart in some ways, so we have some HCE features below
 
@@ -68,7 +68,7 @@ impl Eval for Board {
 
             let king_eval = -advantage * EvalInt::try_from(king_distance).unwrap() / 2;
 
-            eval += king_eval;
+            eval = eval.saturating_add(king_eval);
         }
 
         eval
