@@ -216,9 +216,6 @@ fn cmd_go(mut tokens: std::str::SplitWhitespace<'_>, state: &mut MainState) {
 }
 
 /// Print static evaluation of the position.
-///
-/// This calculation is inefficient compared to what happens in the real engine, but it offers more
-/// information.
 fn cmd_eval(mut _tokens: std::str::SplitWhitespace<'_>, state: &mut MainState) {
     println!("STATIC EVAL");
     println!("board fen: {}", state.board.to_fen());

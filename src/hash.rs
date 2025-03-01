@@ -124,7 +124,7 @@ where
             size_mib <= 12000,
             "Attempted to make {size_mib} MiB hash table; aborting to avoid excessive memory usage."
         );
-        let size = mib_to_n::<T>(size_mib);
+        let size = mib_to_n::<P>(size_mib);
         Self::new_n(size)
     }
 

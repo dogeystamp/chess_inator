@@ -54,6 +54,7 @@ impl From<PromotePiece> for char {
     }
 }
 
+#[derive(Debug)]
 pub struct NonPromotePiece;
 
 impl TryFrom<Piece> for PromotePiece {
@@ -67,6 +68,24 @@ impl TryFrom<Piece> for PromotePiece {
             Piece::Queen => Ok(PromotePiece::Queen),
             Piece::King => Err(NonPromotePiece),
             Piece::Pawn => Err(NonPromotePiece),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct PromPieceInvalidInt;
+
+impl TryFrom<u16> for PromotePiece {
+    type Error = PromPieceInvalidInt;
+
+    fn try_from(value: u16) -> Result<Self, Self::Error> {
+        use PromotePiece::*;
+        match value {
+            value if value == Rook as u16 => Ok(Rook),
+            value if value == Bishop as u16 => Ok(Bishop),
+            value if value == Knight as u16 => Ok(Knight),
+            value if value == Queen as u16 => Ok(Queen),
+            _ => Err(PromPieceInvalidInt),
         }
     }
 }

@@ -216,7 +216,7 @@ fn move_priority(
 }
 
 /// PVS search node type
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum NodeType {
     /// Node is part of the main line (principal variation)
     PV,
@@ -337,7 +337,7 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Optio
                 if let Score::Lower(eval) = entry.eval {
                     if eval > beta && mm.beta.is_some() {
                         // cutoff
-                        return (None, entry.eval)
+                        return (None, entry.eval);
                     }
                 }
             }
@@ -660,7 +660,7 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Optio
         if state.config.enable_trans_table {
             state.cache.write(
                 board.zobrist,
-                TranspositionEntry {
+                TTableEntry {
                     best_move,
                     eval: abs_best,
                     depth: u8::try_from(mm.depth).unwrap(),
@@ -676,8 +676,8 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Optio
     (best_move, abs_best)
 }
 
-#[derive(Clone, Copy, Debug)]
-pub struct TranspositionEntry {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TTableEntry {
     /// best move found last time
     best_move: Move,
     /// last time's eval
@@ -691,14 +691,171 @@ pub struct TranspositionEntry {
     static_eval: Option<EvalInt>,
 }
 
+/// [`TTableEntry`], but with less memory usage
+#[derive(Clone, Copy, Debug)]
+pub struct PackedTTableEntry {
+    eval: EvalInt,
+    static_eval: EvalInt,
+    best_move: u16,
+    flags: std::num::NonZeroU8,
+    depth: u8,
+}
+
 /// Helper to accurately determine the size of the transposition table entries in the hash table.
-struct _HashRecord (
-    crate::hash::Zobrist, TranspositionEntry
-);
+struct _HashRecord(crate::hash::Zobrist, Option<PackedTTableEntry>);
 
-impl crate::hash::TableReplacement for TranspositionEntry {}
+impl crate::hash::PackUnpack<PackedTTableEntry> for TTableEntry {
+    fn pack(self) -> PackedTTableEntry {
+        // best_move, 16 bits:
+        //  0 --  5   source square
+        //  6 -- 11   dest square
+        //    12      is promotion move?
+        // 13 -- 14   promote to what piece?
+        //    15      RESERVED
 
-pub type TranspositionTable = ZobristTable<TranspositionEntry, TranspositionEntry>;
+        #[allow(clippy::assertions_on_constants)]
+        {
+            debug_assert!(
+                N_SQUARES <= 64,
+                "Can't use efficient move packing when N_SQUARES = {N_SQUARES}."
+            );
+        }
+
+        let is_prom = match self.best_move.move_type {
+            crate::movegen::MoveType::Promotion(_) => true,
+            crate::movegen::MoveType::Normal => false,
+        } as u16;
+
+        let prom_pc = match self.best_move.move_type {
+            crate::movegen::MoveType::Promotion(promote_piece) => promote_piece as u16,
+            crate::movegen::MoveType::Normal => 0,
+        };
+
+        debug_assert!(is_prom <= 0b1, "ran out of bits for is_prom {is_prom}");
+        debug_assert!(prom_pc <= 0b11, "ran out of bits for prom_pc {prom_pc}");
+        debug_assert!(
+            self.best_move.dest.0 <= 0b111_111,
+            "ran out of bits for dest"
+        );
+        debug_assert!(self.best_move.src.0 <= 0b111_111, "ran out of bits for src");
+
+        let src = self.best_move.src.0 as u16;
+        let dest = (self.best_move.dest.0 as u16) << 6;
+        let is_prom = is_prom << 12;
+        let prom_pc = prom_pc << 13;
+
+        debug_assert_eq!(
+            src & dest & is_prom & prom_pc,
+            0,
+            "Invalid move packing on {self:?}"
+        );
+
+        // flags: 8 bits
+        // 0    is there a static eval?
+        // 1    is this a qsearch score?
+        // 2    is this a PV node?
+        // 3    is this an exact score?
+        // 4    if not exact, is this an upper bound?
+        // 5    is this a mate score?
+        // 6    always one (A `None` option sets this bit to zero.)
+        // 7    RESERVED
+
+        let flags = self.static_eval.is_some() as u8
+            | (self.is_qsearch as u8) << 1
+            | match self.node_type {
+                NodeType::PV => 1,
+                NodeType::NonPV => 0,
+            } << 2
+            | match self.eval {
+                Score::Checkmate(_) => 0b100,
+                Score::Exact(_) => 0b001,
+                Score::Lower(_) => 0b000,
+                Score::Upper(_) => 0b010,
+                Score::Stopped => panic!("attempted to pack Stopped score"),
+            } << 3
+            | 1 << 6;
+
+        let flags = unsafe {
+            // SAFETY: we just set bit 6 to be always one, so the value must be non-zero
+            std::num::NonZeroU8::new_unchecked(flags)
+        };
+
+        // eval will be the moves till checkmate if it's a mate score,
+        // or the eval otherwise.
+        let eval = match self.eval {
+            Score::Checkmate(m) => m as i16,
+            Score::Exact(s) | Score::Lower(s) | Score::Upper(s) => s,
+            Score::Stopped => panic!("attempted to pack Stopped score"),
+        };
+
+        PackedTTableEntry {
+            static_eval: self.static_eval.unwrap_or(0),
+            eval,
+            best_move: src | dest | is_prom | prom_pc,
+            flags,
+            depth: self.depth,
+        }
+    }
+
+    fn unpack(p: &PackedTTableEntry) -> Self {
+        let is_prom = p.best_move & (1 << 12) != 0;
+        let prom_pc = crate::movegen::PromotePiece::try_from((p.best_move & (0b11 << 13)) >> 13)
+            .expect("Invalid packed move.");
+        let src = Square((p.best_move & 0b111111) as crate::SquareIdx);
+        let dest = Square(((p.best_move & (0b111111 << 6)) >> 6) as crate::SquareIdx);
+
+        let best_move = Move {
+            src,
+            dest,
+            move_type: if is_prom {
+                crate::movegen::MoveType::Promotion(prom_pc)
+            } else {
+                crate::movegen::MoveType::Normal
+            },
+        };
+
+        let flags = p.flags.get();
+
+        let have_static = flags & 1 != 0;
+        let is_qsearch = flags & (1 << 1) != 0;
+        let is_pv = flags & (1 << 2) != 0;
+        let is_exact = flags & (1 << 3) != 0;
+        let is_upper = flags & (1 << 4) != 0;
+        let is_mate = flags & (1 << 5) != 0;
+
+        let eval = if is_mate {
+            Score::Checkmate(p.eval as i8)
+        } else if is_exact {
+            Score::Exact(p.eval)
+        } else if is_upper {
+            Score::Upper(p.eval)
+        } else {
+            Score::Lower(p.eval)
+        };
+
+        let node_type = if is_pv { NodeType::PV } else { NodeType::NonPV };
+
+        let static_eval = if have_static {
+            Some(p.static_eval)
+        } else {
+            None
+        };
+
+        Self {
+            best_move,
+            eval,
+            depth: p.depth,
+            is_qsearch,
+            node_type,
+            static_eval,
+        }
+    }
+}
+
+// opt in to always-replace
+impl crate::hash::TableReplacement for TTableEntry {}
+
+pub type TranspositionTable = ZobristTable<PackedTTableEntry, TTableEntry>;
 
 /// Result of [`iter_deep`].
 struct IterDeepResult {
@@ -1084,5 +1241,63 @@ mod tests {
             orig_board.to_fen(),
             board.to_fen()
         )
+    }
+}
+
+#[cfg(test)]
+mod tests2 {
+    use super::*;
+    use crate::hash::PackUnpack;
+
+    #[test]
+    fn test_ttable_pack_unpack() {
+        let test_cases = [
+            TTableEntry {
+                best_move: Move::from_uci_algebraic("e2e4").unwrap(),
+                eval: Score::Exact(3),
+                depth: 2,
+                is_qsearch: false,
+                node_type: NodeType::PV,
+                static_eval: Some(2),
+            },
+            TTableEntry {
+                best_move: Move::from_uci_algebraic("e7e8q").unwrap(),
+                eval: Score::Lower(3),
+                depth: 0,
+                is_qsearch: true,
+                node_type: NodeType::NonPV,
+                static_eval: None,
+            },
+            TTableEntry {
+                best_move: Move::from_uci_algebraic("e7e8b").unwrap(),
+                eval: Score::Upper(-3),
+                depth: 5,
+                is_qsearch: true,
+                node_type: NodeType::NonPV,
+                static_eval: Some(-3),
+            },
+            TTableEntry {
+                best_move: Move::from_uci_algebraic("e7e8r").unwrap(),
+                eval: Score::Checkmate(-3),
+                depth: 5,
+                is_qsearch: true,
+                node_type: NodeType::NonPV,
+                static_eval: Some(-3),
+            },
+            TTableEntry {
+                best_move: Move::from_uci_algebraic("e7e8n").unwrap(),
+                eval: Score::Checkmate(3),
+                depth: 5,
+                is_qsearch: true,
+                node_type: NodeType::NonPV,
+                static_eval: Some(-3),
+            },
+        ];
+
+        for tc in test_cases {
+            let packed: PackedTTableEntry = tc.pack();
+            let unpacked = TTableEntry::unpack(&packed);
+            assert_eq!(unpacked, tc);
+        }
     }
 }
