@@ -132,15 +132,15 @@ By labelling the position with the real game outcome, the engine gets
 feedback on positions that are good and bad.
 
 <table>
-    <thead>
-        <tr>
-            <th>Name</th>
-            <th>Tag</th>
-            <th>Description</th>
-            <th>Notes</th>
-        </tr>
-    </thead>
-    <tbody>
+<thead>
+    <tr>
+        <th>Name</th>
+        <th>Tag</th>
+        <th>Description</th>
+        <th>Notes</th>
+    </tr>
+</thead>
+<tbody>
 
 <tr>
 <td>Generation 1</td>
@@ -397,5 +397,5 @@ No data.
 </td>
 </tr>
 
-    </tbody>
+</tbody>
 </table>
