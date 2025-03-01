@@ -137,9 +137,9 @@ parser.add_argument(
     help="Load models even if their architecture information is incompatible.",
 )
 parser.add_argument(
-    "--force-epochs",
+    "--fine-tune",
     action="store_true",
-    help="Sets the epoch counter on a loaded checkpoint to 0. Useful for fine-tuning using existing weights.",
+    help="Sets the epoch counter to zero, and loads the best model state.",
 )
 parser.add_argument(
     "--log",
@@ -695,6 +695,7 @@ def train(
     model: NNUE,
     save_path: Path | None = None,
     load_path: Path | None = None,
+    load_best=False,
     log_path: Path | None = None,
     test_dataset_path: Path | None = None,
 ):
@@ -716,7 +717,9 @@ def train(
 
     if load_path and load_path.is_file():
         logging.info("Loading saved model from '%s'...", load_path)
-        saved_epoch = load_model(load_path, model, optimizer, scheduler, load_best=False)
+        saved_epoch = load_model(
+            load_path, model, optimizer, scheduler, load_best=load_best
+        )
         if saved_epoch is not None:
             last_big_epoch, last_epoch = divmod(saved_epoch, EPOCHS)
             big_epoch_start, epoch_start = divmod(saved_epoch + 1, EPOCHS)
@@ -912,7 +915,7 @@ def load_model(
         if state := checkpoint["early_stop"]:
             early_stop.load_state_dict(state)
     model.l1_size = checkpoint.get("l1_size") or model.l1_size
-    if "args" in globals() and args.force_epochs:
+    if "args" in globals() and args.fine_tune:
         return None
     else:
         return checkpoint.get("epoch")
@@ -980,4 +983,4 @@ if __name__ == "__main__":
 
     model = NNUE()
     model.to(device)
-    train(model, args.save, args.load, args.log, args.test_dataset)
+    train(model, args.save, args.load, args.fine_tune, args.log, args.test_dataset)
