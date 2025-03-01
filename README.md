@@ -141,6 +141,7 @@ feedback on positions that are good and bad.
         </tr>
     </thead>
     <tbody>
+
 <tr>
 <td>Generation 1</td>
 <td>
