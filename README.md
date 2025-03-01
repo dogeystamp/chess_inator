@@ -349,5 +349,52 @@ Wins: 475, Losses: 373, Draws: 166
 
 </td>
 </tr>
+
+
+<tr>
+<td>Generation 8a</td>
+<td>
+
+`nnue08a-512`
+
+</td>
+<td>
+
+Fine-tuned gen 7d on ~2.4M self-play positions. Does not seem to gain much in
+terms of Elo, possibly because of using a dataset half the size as gen 7.
+
+</td>
+<td>
+
+```
+vs c_i eval-saturating (9b3074e)
+nElo: 22.46 +/- 15.13
+Wins: 867, Losses: 753, Draws: 406
+```
+
+</td>
+</tr>
+
+
+<tr>
+<td>Generation 8b</td>
+<td>
+
+N/A
+
+</td>
+<td>
+
+Trained like 8a, but with 768 neurons. This overfitted faster than 8a, so it
+has been discarded.
+
+</td>
+<td>
+
+No data.
+
+</td>
+</tr>
+
     </tbody>
 </table>
