@@ -1218,12 +1218,14 @@ impl MoveGenInternal for Board {
     }
 }
 
+impl crate::hash::TableReplacement for (usize, usize) {}
+
 fn perft_internal(
     depth: usize,
     pos: &mut Board,
-    cache: &mut ZobristTable<(usize, usize)>,
+    cache: &mut ZobristTable<(usize, usize), (usize, usize)>,
 ) -> usize {
-    if let Some((ans, cache_depth)) = cache[pos.zobrist] {
+    if let Some((ans, cache_depth)) = cache.get(pos.zobrist) {
         if depth == cache_depth {
             return ans;
         }
@@ -1242,7 +1244,7 @@ fn perft_internal(
         anti_move.unmake(pos);
     }
 
-    cache[pos.zobrist] = Some((ans, depth));
+    cache.write(pos.zobrist, (ans, depth));
     ans
 }
 

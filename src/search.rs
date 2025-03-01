@@ -187,7 +187,7 @@ fn move_priority(
     let mut is_mate_score = false;
 
     if state.config.enable_trans_table {
-        if let Some(entry) = &state.cache[board.zobrist] {
+        if let Some(entry) = &state.cache.get(board.zobrist) {
             eval = EvalInt::from(entry.eval) / 100;
             if let Score::Checkmate(_) = entry.eval {
                 is_mate_score = true;
@@ -320,7 +320,7 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Optio
 
     // get transposition table entry
     if state.config.enable_trans_table {
-        if let Some(entry) = &state.cache[board.zobrist] {
+        if let Some(entry) = &state.cache.get(board.zobrist) {
             trans_table_move = Some(entry.best_move);
             trans_table_static_eval = entry.static_eval;
             if usize::from(entry.depth) >= mm.depth
@@ -658,7 +658,7 @@ fn minmax(board: &mut Board, state: &mut EngineState, mm: MinmaxState) -> (Optio
 
     if let Some(best_move) = best_move {
         if state.config.enable_trans_table {
-            state.cache.save_entry(
+            state.cache.write(
                 board.zobrist,
                 TranspositionEntry {
                     best_move,
@@ -696,14 +696,9 @@ struct _HashRecord (
     crate::hash::Zobrist, TranspositionEntry
 );
 
-impl crate::hash::TableReplacement for TranspositionEntry {
-    fn replaces(&self, _other: &Self) -> bool {
-        // always-replace strategy
-        true
-    }
-}
+impl crate::hash::TableReplacement for TranspositionEntry {}
 
-pub type TranspositionTable = ZobristTable<TranspositionEntry>;
+pub type TranspositionTable = ZobristTable<TranspositionEntry, TranspositionEntry>;
 
 /// Result of [`iter_deep`].
 struct IterDeepResult {
@@ -978,7 +973,7 @@ pub fn probe_pv(board: &mut Board, state: &mut EngineState, stack: &mut PVStack)
     }
 
     if state.config.enable_trans_table {
-        if let Some(entry) = &state.cache[board.zobrist] {
+        if let Some(entry) = &state.cache.get(board.zobrist) {
             let mv = entry.best_move;
             stack.push(mv);
             let anti_mv = mv.make(board);
