@@ -96,6 +96,7 @@ impl Zobrist {
 #[derive(Debug)]
 pub struct ZobristTable<T> {
     data: Vec<(Zobrist, Option<T>)>,
+    /// Number of entries.
     size: usize,
 }
 
@@ -130,7 +131,7 @@ impl<T: Copy> ZobristTable<T> {
     pub fn new_pow2(size_exp: usize) -> Self {
         ZobristTable {
             data: vec![(Zobrist { hash: 0 }, None); 1 << size_exp],
-            size: size_exp,
+            size: 1 << size_exp,
         }
     }
 }
