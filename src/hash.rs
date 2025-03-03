@@ -17,6 +17,8 @@ use crate::util::random::Pcg64Random;
 use crate::{
     Board, CastleRights, ColPiece, Color, Square, BOARD_WIDTH, N_COLORS, N_PIECES, N_SQUARES,
 };
+use std::ops::Index;
+use std::ops::IndexMut;
 
 const PIECE_KEYS: [[[u64; N_SQUARES]; N_PIECES]; N_COLORS] = [
     Pcg64Random::new(11).random_arr_2d_64(),
@@ -37,7 +39,7 @@ const COL_KEY: [u64; N_COLORS] = Pcg64Random::new(55).random_arr_64();
 /// This is not synced to board state, so ensure that all changes made are reflected in the hash
 /// too.
 #[derive(PartialEq, Eq, Clone, Copy, Default, Debug)]
-pub struct Zobrist {
+pub(crate) struct Zobrist {
     hash: u64,
 }
 
@@ -90,20 +92,11 @@ impl Zobrist {
 
 /// Map that takes Zobrist hashes as keys.
 ///
-/// `P` is the saved packed data representation, while `T` is the unpacked representation. `T` will
-/// be transparently converted to and from `P` when writing/reading from the table. If
-/// [`PackUnpack`] is not implemented, use the same type for `P` and `T` and the default
-/// implementation (do nothing) will be used.
-///
-/// [`TableReplacement`] must also be implemented to write entries; there is a default
-/// always-replace implementation.
-///
-/// This is heap allocated (it's a vector).
+/// Heap allocated (it's a vector).
 #[derive(Debug)]
-pub struct ZobristTable<P, T: PackUnpack<P>> {
-    data: Vec<(Zobrist, Option<P>)>,
+pub struct ZobristTable<T> {
+    data: Vec<(Zobrist, Option<T>)>,
     size: usize,
-    phantom: std::marker::PhantomData<T>,
 }
 
 /// Convert a transposition table size in mebibytes to a number of entries.
@@ -114,10 +107,7 @@ pub fn mib_to_n<T: Sized>(mib: usize) -> usize {
     bytes / entry_size
 }
 
-impl<P, T: PackUnpack<P>> ZobristTable<P, T>
-where
-    P: Copy,
-{
+impl<T: Copy> ZobristTable<T> {
     /// Create a Zobrist-keyed table.
     pub fn new(size_mib: usize) -> Self {
         assert!(
@@ -130,45 +120,55 @@ where
 
     /// Create a table with n entries.
     pub fn new_n(size: usize) -> Self {
-        ZobristTable::<P, T> {
+        ZobristTable {
             data: vec![(Zobrist { hash: 0 }, None); size],
             size,
-            phantom: std::marker::PhantomData,
         }
     }
 
     /// Create a table with 2^n entries.
     pub fn new_pow2(size_exp: usize) -> Self {
-        ZobristTable::<P, T> {
+        ZobristTable {
             data: vec![(Zobrist { hash: 0 }, None); 1 << size_exp],
             size: size_exp,
-            phantom: std::marker::PhantomData,
         }
     }
+}
 
-    /// Read entry, if it exists.
-    pub fn get(&self, zobrist: Zobrist) -> Option<T> {
+impl<T> IndexMut<Zobrist> for ZobristTable<T> {
+    /// Overwrite a table entry (always replace strategy).
+    ///
+    /// If you `mut`ably index, it will automatically wipe an existing entry,
+    /// regardless of it was a cache hit or miss.
+    fn index_mut(&mut self, zobrist: Zobrist) -> &mut Self::Output {
+        let idx = zobrist.truncate_hash(self.size);
+        self.data[idx].0 = zobrist;
+        self.data[idx].1 = None;
+        &mut self.data[idx].1
+    }
+}
+
+impl<T> Index<Zobrist> for ZobristTable<T> {
+    type Output = Option<T>;
+
+    fn index(&self, zobrist: Zobrist) -> &Self::Output {
         let idx = zobrist.truncate_hash(self.size);
         let data = &self.data[idx];
         if data.0 == zobrist {
-            data.1.map(|p| T::unpack(&p))
+            &data.1
         } else {
             // miss
-            None
+            &None
         }
     }
 }
 
 pub trait TableReplacement {
     /// Do we replace `other`?
-    #[allow(unused_variables)]
-    fn replaces(&self, other: &Self) -> bool {
-        // by default, always replace
-        true
-    }
+    fn replaces(&self, other: &Self) -> bool;
 }
 
-impl<P, T: TableReplacement + PackUnpack<P>> ZobristTable<P, T> {
+impl<T: TableReplacement> ZobristTable<T> {
     /// Attempt to save an entry to the Zobrist table.
     ///
     /// If there is an existing entry (due to a hash collision), `Ord` comparison will be used, and
@@ -176,14 +176,14 @@ impl<P, T: TableReplacement + PackUnpack<P>> ZobristTable<P, T> {
     ///
     /// For an "always replace" replacement scheme, try using the `IndexMut` interface to save
     /// entries to the table.
-    pub fn write(&mut self, zobrist: Zobrist, entry: T) {
+    pub(crate) fn save_entry(&mut self, zobrist: Zobrist, entry: T) {
         let idx = zobrist.truncate_hash(self.size);
         let existing_data = &self.data[idx];
 
         let mut overwrite = false;
 
         if let Some(existing_entry) = &existing_data.1 {
-            if entry.replaces(&T::unpack(existing_entry)) {
+            if entry.replaces(existing_entry) {
                 overwrite = true;
             }
         } else {
@@ -192,26 +192,8 @@ impl<P, T: TableReplacement + PackUnpack<P>> ZobristTable<P, T> {
 
         if overwrite {
             self.data[idx].0 = zobrist;
-            self.data[idx].1 = Some(entry.pack());
+            self.data[idx].1 = Some(entry);
         }
-    }
-}
-
-/// Once implemented, hash tables will automatically pack data before saving it.
-///
-/// If not implemented, an identity function is used instead of pack/unpack.
-pub trait PackUnpack<P> {
-    fn pack(self) -> P;
-    fn unpack(p: &P) -> Self;
-}
-
-impl<T: Copy> PackUnpack<T> for T {
-    fn pack(self) -> Self {
-        self
-    }
-
-    fn unpack(p: &T) -> Self {
-        *p
     }
 }
 
@@ -248,22 +230,22 @@ mod tests {
         ];
         for (pos1_fen, pos2_fen, mv_uci) in test_cases {
             eprintln!("tc: {}", pos1_fen);
-            let mut table = ZobristTable::<usize, usize>::new(4);
+            let mut table = ZobristTable::<usize>::new(4);
             let mut pos1 = Board::from_fen(pos1_fen).unwrap();
             let hash1_orig = pos1.zobrist;
-            assert_eq!(table.get(pos1.zobrist), None);
-            table.write(pos1.zobrist, 100);
+            assert_eq!(table[pos1.zobrist], None);
+            table[pos1.zobrist] = Some(100);
             eprintln!("refreshing board 2 '{}'", pos2_fen);
             let pos2 = Board::from_fen(pos2_fen).unwrap();
-            table.write(pos2.zobrist, 200);
+            table[pos2.zobrist] = Some(200);
             eprintln!("making mv {}", mv_uci);
             let mv = Move::from_uci_algebraic(mv_uci).unwrap();
             let anti_mv = mv.make(&mut pos1);
             assert_eq!(pos1.zobrist, pos2.zobrist);
-            assert_eq!(table.get(pos1.zobrist), Some(200));
+            assert_eq!(table[pos1.zobrist], Some(200));
             anti_mv.unmake(&mut pos1);
             assert_eq!(pos1.zobrist, hash1_orig);
-            assert_eq!(table.get(pos1.zobrist), Some(100));
+            assert_eq!(table[pos1.zobrist], Some(100));
         }
     }
 
@@ -300,7 +282,7 @@ mod tests {
 
     #[test]
     fn test_table() {
-        let mut table = ZobristTable::<usize, usize>::new_pow2(4);
+        let mut table = ZobristTable::<usize>::new_pow2(4);
 
         macro_rules! z {
             ($i: expr) => {
@@ -310,13 +292,13 @@ mod tests {
 
         let big_number = 1 << 62;
 
-        table.write(z!(big_number + 3), 4);
-        table.write(z!(big_number + 19), 5);
+        table[z!(big_number + 3)] = Some(4);
+        table[z!(big_number + 19)] = Some(5);
 
         // clobbered by newer entry
-        assert_eq!(table.get(z!(big_number + 3)), None);
+        assert_eq!(table[z!(big_number + 3)], None);
 
-        assert_eq!(table.get(z!(big_number + 19)), Some(5));
+        assert_eq!(table[z!(big_number + 19)], Some(5));
 
         eprintln!("{table:?}");
     }
@@ -329,7 +311,7 @@ mod tests {
 
     #[test]
     fn test_replacement() {
-        let mut table = ZobristTable::<usize, usize>::new_pow2(4);
+        let mut table = ZobristTable::<usize>::new_pow2(4);
 
         macro_rules! z {
             ($i: expr) => {
@@ -339,16 +321,16 @@ mod tests {
 
         let big_number = 1 << 62;
 
-        table.write(z!(big_number + 19), 5);
-        table.write(z!(big_number + 3), 4);
+        table.save_entry(z!(big_number + 19), 5);
+        table.save_entry(z!(big_number + 3), 4);
 
         // newer entry is less important, should not clobber
-        assert_eq!(table.get(z!(big_number + 19)), Some(5));
+        assert_eq!(table[z!(big_number + 19)], Some(5));
 
         // should clobber now
-        table.write(z!(big_number + 3), 6);
-        assert_eq!(table.get(z!(big_number + 3)), Some(6));
-        assert_eq!(table.get(z!(big_number + 19)), None);
+        table.save_entry(z!(big_number + 3), 6);
+        assert_eq!(table[z!(big_number + 3)], Some(6));
+        assert_eq!(table[z!(big_number + 19)], None);
 
         eprintln!("{table:?}");
     }
