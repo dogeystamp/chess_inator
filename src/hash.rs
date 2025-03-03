@@ -98,6 +98,8 @@ pub struct ZobristTable<T> {
     data: Vec<(Zobrist, Option<T>)>,
     /// Number of entries.
     size: usize,
+    /// Number of entries with data, i.e. that are `Some`.
+    used: usize,
 }
 
 /// Convert a transposition table size in mebibytes to a number of entries.
@@ -124,6 +126,7 @@ impl<T: Copy> ZobristTable<T> {
         ZobristTable {
             data: vec![(Zobrist { hash: 0 }, None); size],
             size,
+            used: 0,
         }
     }
 
@@ -132,7 +135,21 @@ impl<T: Copy> ZobristTable<T> {
         ZobristTable {
             data: vec![(Zobrist { hash: 0 }, None); 1 << size_exp],
             size: 1 << size_exp,
+            used: 0,
         }
+    }
+
+    /// Get the permille (tenth of percents) of entries used.
+    pub fn get_hashfull(&self) -> u16 {
+        debug_assert!(self.used <= self.size);
+
+        let used_thousands = self.used.checked_mul(1000);
+        debug_assert!(used_thousands.is_some());
+
+        let permille = used_thousands.unwrap_or(self.size) / self.size;
+        debug_assert!(permille <= 1000, "permille {permille} out of bounds");
+
+        permille as u16
     }
 }
 
@@ -144,7 +161,11 @@ impl<T> IndexMut<Zobrist> for ZobristTable<T> {
     fn index_mut(&mut self, zobrist: Zobrist) -> &mut Self::Output {
         let idx = zobrist.truncate_hash(self.size);
         self.data[idx].0 = zobrist;
-        self.data[idx].1 = None;
+        if self.data[idx].1.is_none() {
+            self.used += 1;
+        } else {
+            self.data[idx].1 = None;
+        }
         &mut self.data[idx].1
     }
 }
@@ -193,6 +214,9 @@ impl<T: TableReplacement> ZobristTable<T> {
 
         if overwrite {
             self.data[idx].0 = zobrist;
+            if self.data[idx].1.is_none() {
+                self.used += 1;
+            }
             self.data[idx].1 = Some(entry);
         }
     }

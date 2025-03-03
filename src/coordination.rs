@@ -163,6 +163,8 @@ pub struct MsgBestmove {
     pub nodes: usize,
     /// Number of nodes searched per second
     pub nps: usize,
+    /// Permille (tenth of percents) of hash table entries filled
+    pub hashfull: u16,
     /// Time spent for this search (milliseconds)
     pub time_ms: usize,
     /// Extra information (displayed as `info string`).

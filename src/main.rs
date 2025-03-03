@@ -366,8 +366,8 @@ fn outp_bestmove(bestmove: MsgBestmove) {
             .fold(String::new(), |a, b| a + " " + &b)
     );
     println!(
-        "info depth {} nodes {} nps {}",
-        bestmove.depth, bestmove.nodes, bestmove.nps,
+        "info depth {} nodes {} nps {} hashfull {}",
+        bestmove.depth, bestmove.nodes, bestmove.nps, bestmove.hashfull,
     );
     match bestmove.eval {
         Score::Checkmate(n) => println!("info score mate {}", n / 2),
@@ -464,6 +464,7 @@ fn task_engine(tx_main: Sender<MsgToMain>, rx_engine: Receiver<MsgToEngine>) {
                             info,
                             nodes: state.node_count,
                             nps,
+                            hashfull: state.cache.get_hashfull(),
                             time_ms: elapsed_us / 1000,
                             depth: search_res.depth,
                         }))
