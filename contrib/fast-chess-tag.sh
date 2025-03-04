@@ -6,7 +6,7 @@
 # Example usage:
 #
 #	 cd chess_tournaments
-#	 fast-chess-tag.sh quiescence no-quiescence -openings file=8moves_v3.pgn format=pgn order=random -each tc=8+0.08 -rounds 1200 -repeat -concurrency 8 -recover -sprt elo0=0 elo1=10 alpha=0.05 beta=0.05
+#	 fast-chess-tag.sh quiescence no-quiescence -openings file=8moves_v3.pgn format=pgn order=random -each tc=8+0.08 -each option.Hash=200 -rounds 1200 -repeat -concurrency 8 -recover -sprt elo0=0 elo1=10 alpha=0.05 beta=0.05
 #
 # You need to be in a chess_inator Git repository to run this script. Ensure
 # that the repository you're in is a throw-away worktree. Create one using:
@@ -82,8 +82,8 @@ cp target/release/chess_inator engine2
 OUTPUT=$(mktemp)
 
 fastchess \
-	-engine cmd=engine1 name="c_i $TAG1 ($COMM1)" option.Hash=500 \
-	-engine cmd=engine2 name="c_i $TAG2 ($COMM2)" option.Hash=500 \
+	-engine cmd=engine1 name="c_i $TAG1 ($COMM1)" \
+	-engine cmd=engine2 name="c_i $TAG2 ($COMM2)" \
 	-pgnout file="$PGN" \
 	timeleft=true \
 	$@ \
