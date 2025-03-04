@@ -130,7 +130,7 @@ async def worker(game_generator: AsyncIterator[pgn.Game]) -> None:
     Puts rows of output into a global queue.
     """
     transport, engine = await chess.engine.popen_uci(args.engine)
-    await engine.configure(dict(NNUETrainInfo="true", Hash="800"))
+    await engine.configure(dict(NNUETrainInfo="true", Hash="200"))
 
     async for game in game_generator:
         wdl: int | None = None
