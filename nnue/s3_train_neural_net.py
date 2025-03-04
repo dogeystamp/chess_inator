@@ -835,9 +835,10 @@ def visualize_train_log(log_path: Path = Path("log_training.csv")):
     print(df)
 
     max_v = max(df["test_loss"].values.max(), df["train_loss"].values.max())  # type: ignore
+    min_v = min(df["test_loss"].values.min(), df["train_loss"].values.min())  # type: ignore
 
     for i in range(0, end_epoch + 1, EPOCHS):
-        plt.plot([i, i], [0, max_v], linestyle="dashed", color="gray")
+        plt.plot([i, i], [min_v, max_v], linestyle="dashed", color="gray")
 
     plt.plot(df.index, df["train_loss"], label="Train loss")
     plt.plot(df.index, df["test_loss"], label="Test loss")
