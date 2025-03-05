@@ -397,5 +397,57 @@ No data.
 </td>
 </tr>
 
+
+<tr>
+<td>Generation 9a</td>
+<td>
+
+nnue09a-512
+
+</td>
+<td>
+
+Fine-tuned 8a on 2.5M self-play positions.
+Gains a little, but not enough Elo.
+
+</td>
+<td>
+
+```
+vs c_i hashfull (8f3be5d)
+nElo: 8.69 +/- 8.32
+Wins: 2795, Losses: 2646, Draws: 1259
+```
+
+</td>
+</tr>
+
+
+<tr>
+<td>Generation 9c</td>
+<td>
+
+nnue09c-512
+
+</td>
+<td>
+
+Sibling of 9a, but also includes 7d self-play positions, rescored by 8a.
+Loses Elo compared to 9a; discarded.
+
+Gen 9b does not, and has not ever existed 👁️
+
+</td>
+<td>
+
+```
+vs c_i nnue09a-512 (306cac9)
+nElo: -8.36 +/- 15.00
+Wins: 820, Losses: 865, Draws: 375
+```
+
+</td>
+</tr>
+
 </tbody>
 </table>
