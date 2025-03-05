@@ -435,8 +435,6 @@ nnue09c-512
 Sibling of 9a, but also includes 7d self-play positions, rescored by 8a.
 Loses Elo compared to 9a; discarded.
 
-Gen 9b does not, and has not ever existed 👁️
-
 </td>
 <td>
 
@@ -444,6 +442,31 @@ Gen 9b does not, and has not ever existed 👁️
 vs c_i nnue09a-512 (306cac9)
 nElo: -8.36 +/- 15.00
 Wins: 820, Losses: 865, Draws: 375
+```
+
+</td>
+</tr>
+
+
+<tr>
+<td>Generation 9d</td>
+<td>
+
+nnue09d-512
+
+</td>
+<td>
+
+Sibling of 9c, but re-trained entirely instead of fine-tuned.
+Loses much Elo.
+
+</td>
+<td>
+
+```
+vs c_i nnue09a-512 (306cac9)
+nElo: -26.56 +/- 22.93
+Wins: 326, Losses: 389, Draws: 167
 ```
 
 </td>
