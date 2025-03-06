@@ -354,45 +354,44 @@ fn cmd_root(mut tokens: std::str::SplitWhitespace<'_>, state: &mut MainState) {
     }
 }
 
-/// Format a bestmove.
-fn outp_bestmove(bestmove: MsgBestmove) {
-    println!(
-        "info time {} pv{}",
-        bestmove.time_ms,
-        bestmove
-            .pv
-            .iter()
-            .map(|mv| mv.to_uci_algebraic())
-            .fold(String::new(), |a, b| a + " " + &b)
-    );
-    println!(
-        "info depth {} nodes {} nps {} hashfull {}",
-        bestmove.depth, bestmove.nodes, bestmove.nps, bestmove.hashfull,
-    );
-    match bestmove.eval {
-        Score::Checkmate(n) => println!("info score mate {}", n / 2),
+/// Format engine information.
+fn outp_info(info: MsgInfo, is_best_move: bool) {
+    let pv_str = info
+        .pv
+        .iter()
+        .map(|mv| mv.to_uci_algebraic())
+        .fold("pv".to_string(), |a, b| a + " " + &b);
+
+    let score_str = match info.eval {
+        Score::Checkmate(n) => format!("score mate {}", n / 2),
         Score::Exact(eval) | Score::Lower(eval) | Score::Upper(eval) => {
-            println!("info score cp {}", eval,)
+            format!("score cp {}", eval,)
         }
         Score::Stopped => {
-            panic!("info string ERROR: stopped search")
+            panic!("ERROR: attempted to output stopped search")
         }
-    }
-    for line in bestmove.info {
+    };
+    println!(
+        "info {score_str} time {} depth {} nodes {} nps {} hashfull {} {pv_str}",
+        info.time_ms, info.depth, info.nodes, info.nps, info.hashfull,
+    );
+    for line in info.info {
         println!("info string {line}");
     }
 
-    let mut pv_in_order = bestmove.pv.iter();
-    let (chosen, ponder_mv) = (pv_in_order.next(), pv_in_order.next());
-    match chosen {
-        Some(mv) => print!("bestmove {}", mv.to_uci_algebraic()),
-        None => print!("bestmove 0000"),
-    }
+    if is_best_move {
+        let mut pv_in_order = info.pv.iter();
+        let (chosen, ponder_mv) = (pv_in_order.next(), pv_in_order.next());
+        match chosen {
+            Some(mv) => print!("bestmove {}", mv.to_uci_algebraic()),
+            None => print!("bestmove 0000"),
+        }
 
-    if let Some(mv) = ponder_mv {
-        print!(" ponder {}", mv.to_uci_algebraic())
+        if let Some(mv) = ponder_mv {
+            print!(" ponder {}", mv.to_uci_algebraic())
+        }
+        println!();
     }
-    println!();
 }
 
 /// The "Stdin" thread to read stdin while avoiding blocking
@@ -458,7 +457,7 @@ fn task_engine(tx_main: Sender<MsgToMain>, rx_engine: Receiver<MsgToEngine>) {
                     let nps = state.node_count.saturating_mul(1_000_000) / elapsed_us;
 
                     tx_main
-                        .send(MsgToMain::Bestmove(MsgBestmove {
+                        .send(MsgToMain::BestMove(MsgInfo {
                             pv: search_res.pv,
                             eval: search_res.eval,
                             info,
@@ -555,13 +554,16 @@ fn main() {
                     uci_cmd_queue.push_back(line);
                 }
             }
-            MsgToMain::Bestmove(msg_bestmove) => {
+            MsgToMain::BestMove(msg_info) => {
                 state
                     .uci_mode
                     .transition(UCIModeTransition::Bestmove)
                     .unwrap();
-                outp_bestmove(msg_bestmove);
+                outp_info(msg_info, true);
                 state.accept_uci_input = true;
+            }
+            MsgToMain::Info(msg_info) => {
+                outp_info(msg_info, false);
             }
         }
     }

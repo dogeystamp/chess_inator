@@ -14,7 +14,7 @@ Copyright © 2024 dogeystamp <dogeystamp@disroot.org>
 //! Prelude that you can import entirely to use the library conveniently.
 
 pub use crate::coordination::{
-    GoMessage, MsgBestmove, MsgToEngine, MsgToMain, UCIMode, UCIModeMachine, UCIModeTransition,
+    GoMessage, MsgInfo, MsgToEngine, MsgToMain, UCIMode, UCIModeMachine, UCIModeTransition,
 };
 pub use crate::eval::{Eval, EvalInt, EvalSEE};
 pub use crate::fen::{FromFen, ToFen};

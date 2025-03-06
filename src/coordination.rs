@@ -154,7 +154,7 @@ mod test_state_machine {
 
 /// Message (engine->main) to communicate the best move.
 #[derive(Clone, Debug)]
-pub struct MsgBestmove {
+pub struct MsgInfo {
     /// Best line (reversed stack; last element is best current move)
     pub pv: PVStack,
     /// Evaluation of the position
@@ -177,7 +177,8 @@ pub struct MsgBestmove {
 #[derive(Clone, Debug)]
 pub enum MsgToMain {
     StdinLine(String),
-    Bestmove(MsgBestmove),
+    Info(MsgInfo),
+    BestMove(MsgInfo),
 }
 
 pub struct GoMessage {
