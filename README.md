@@ -131,6 +131,9 @@ The real outcome is interpolated with the engine evaluation to give an
 By labelling the position with the real game outcome, the engine gets
 feedback on positions that are good and bad.
 
+Note for future engine devs: these networks have been trained with severely insufficient datasets;
+do not copy the training parameters from this project.
+
 <table>
 <thead>
     <tr>
